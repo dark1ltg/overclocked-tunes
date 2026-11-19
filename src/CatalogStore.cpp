@@ -127,7 +127,7 @@ void CatalogStore::upsertRemixes(const QVector<RemixRecord> &records)
             thumbnail_url=excluded.thumbnail_url,
             duration=COALESCE(NULLIF(excluded.duration, ''), remixes.duration),
             mirrors=CASE WHEN excluded.mirrors = '' THEN remixes.mirrors ELSE excluded.mirrors END,
-            status=CASE WHEN remixes.status IN ('downloaded', 'unavailable') THEN remixes.status ELSE excluded.status END,
+            status=CASE WHEN remixes.status IN ('downloaded', 'unavailable', 'in-torrent') THEN remixes.status ELSE excluded.status END,
             local_path=CASE WHEN excluded.local_path = '' THEN remixes.local_path ELSE excluded.local_path END
     )"));
     for (const auto &r : records) {
@@ -152,7 +152,39 @@ void CatalogStore::upsertRemixes(const QVector<RemixRecord> &records)
 
 void CatalogStore::updateRemix(const RemixRecord &record)
 {
-    upsertRemixes({record});
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(R"(
+        INSERT INTO remixes (ocr_id, ocr_number, title, game, artists, posted, page_url,
+                             thumbnail_url, duration, mirrors, status, local_path, last_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ocr_id) DO UPDATE SET
+            ocr_number=excluded.ocr_number,
+            title=CASE WHEN excluded.title = '' THEN remixes.title ELSE excluded.title END,
+            game=CASE WHEN excluded.game = '' THEN remixes.game ELSE excluded.game END,
+            artists=CASE WHEN excluded.artists = '' THEN remixes.artists ELSE excluded.artists END,
+            posted=CASE WHEN excluded.posted = '' THEN remixes.posted ELSE excluded.posted END,
+            page_url=CASE WHEN excluded.page_url = '' THEN remixes.page_url ELSE excluded.page_url END,
+            thumbnail_url=CASE WHEN excluded.thumbnail_url = '' THEN remixes.thumbnail_url ELSE excluded.thumbnail_url END,
+            duration=CASE WHEN excluded.duration = '' THEN remixes.duration ELSE excluded.duration END,
+            mirrors=CASE WHEN excluded.mirrors = '' THEN remixes.mirrors ELSE excluded.mirrors END,
+            status=excluded.status,
+            local_path=CASE WHEN excluded.local_path = '' THEN remixes.local_path ELSE excluded.local_path END,
+            last_error=excluded.last_error
+    )"));
+    q.addBindValue(record.ocrId);
+    q.addBindValue(record.ocrNumber);
+    q.addBindValue(record.title);
+    q.addBindValue(record.game);
+    q.addBindValue(record.artists);
+    q.addBindValue(record.posted);
+    q.addBindValue(record.pageUrl);
+    q.addBindValue(record.thumbnailUrl);
+    q.addBindValue(record.duration);
+    q.addBindValue(joinList(record.mirrors));
+    q.addBindValue(record.status.isEmpty() ? QStringLiteral("available") : record.status);
+    q.addBindValue(record.localPath);
+    q.addBindValue(record.lastError);
+    q.exec();
 }
 
 RemixRecord CatalogStore::remixFromQuery(const QSqlQuery &q) const
@@ -232,7 +264,8 @@ QVector<RemixRecord> CatalogStore::remixesNeedingDownload() const
 {
     QVector<RemixRecord> out;
     QSqlQuery q(db());
-    q.exec(QStringLiteral("SELECT * FROM remixes WHERE status NOT IN ('downloaded', 'unavailable') ORDER BY ocr_number"));
+    q.exec(QStringLiteral(
+        "SELECT * FROM remixes WHERE status NOT IN ('downloaded', 'unavailable', 'in-torrent') ORDER BY ocr_number"));
     while (q.next())
         out.push_back(remixFromQuery(q));
     return out;
@@ -250,6 +283,27 @@ int CatalogStore::remixDownloadedCount() const
     QSqlQuery q(db());
     q.exec(QStringLiteral("SELECT COUNT(*) FROM remixes WHERE status='downloaded'"));
     return q.next() ? q.value(0).toInt() : 0;
+}
+
+int CatalogStore::remixTorrentCoveredCount() const
+{
+    QSqlQuery q(db());
+    q.exec(QStringLiteral("SELECT COUNT(*) FROM remixes WHERE status='in-torrent'"));
+    return q.next() ? q.value(0).toInt() : 0;
+}
+
+void CatalogStore::markRemixesInTorrentRange(int from, int to, const QString &note)
+{
+    if (to < from)
+        return;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "UPDATE remixes SET status='in-torrent', last_error=? "
+        "WHERE ocr_number BETWEEN ? AND ? AND status NOT IN ('downloaded', 'unavailable')"));
+    q.addBindValue(note);
+    q.addBindValue(from);
+    q.addBindValue(to);
+    q.exec();
 }
 
 void CatalogStore::upsertAlbums(const QVector<AlbumRecord> &records)
@@ -271,7 +325,7 @@ void CatalogStore::upsertAlbums(const QVector<AlbumRecord> &records)
             http_homepage=CASE WHEN excluded.http_homepage = '' THEN albums.http_homepage ELSE excluded.http_homepage END,
             zip_mirrors=CASE WHEN excluded.zip_mirrors = '' THEN albums.zip_mirrors ELSE excluded.zip_mirrors END,
             ocr_published=excluded.ocr_published,
-            status=CASE WHEN albums.status IN ('downloaded', 'catalog-only') THEN albums.status ELSE excluded.status END,
+            status=CASE WHEN albums.status IN ('downloaded', 'catalog-only', 'in-torrent') THEN albums.status ELSE excluded.status END,
             local_path=CASE WHEN excluded.local_path = '' THEN albums.local_path ELSE excluded.local_path END
     )"));
     for (const auto &a : records) {
@@ -297,7 +351,41 @@ void CatalogStore::upsertAlbums(const QVector<AlbumRecord> &records)
 
 void CatalogStore::updateAlbum(const AlbumRecord &record)
 {
-    upsertAlbums({record});
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(R"(
+        INSERT INTO albums (album_id, slug, title, catalog, classification, released, page_url,
+                            torrent_url, http_homepage, zip_mirrors, ocr_published, status, local_path, last_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(album_id) DO UPDATE SET
+            slug=CASE WHEN excluded.slug = '' THEN albums.slug ELSE excluded.slug END,
+            title=CASE WHEN excluded.title = '' THEN albums.title ELSE excluded.title END,
+            catalog=CASE WHEN excluded.catalog = '' THEN albums.catalog ELSE excluded.catalog END,
+            classification=CASE WHEN excluded.classification = '' THEN albums.classification ELSE excluded.classification END,
+            released=CASE WHEN excluded.released = '' THEN albums.released ELSE excluded.released END,
+            page_url=CASE WHEN excluded.page_url = '' THEN albums.page_url ELSE excluded.page_url END,
+            torrent_url=CASE WHEN excluded.torrent_url = '' THEN albums.torrent_url ELSE excluded.torrent_url END,
+            http_homepage=CASE WHEN excluded.http_homepage = '' THEN albums.http_homepage ELSE excluded.http_homepage END,
+            zip_mirrors=CASE WHEN excluded.zip_mirrors = '' THEN albums.zip_mirrors ELSE excluded.zip_mirrors END,
+            ocr_published=excluded.ocr_published,
+            status=excluded.status,
+            local_path=CASE WHEN excluded.local_path = '' THEN albums.local_path ELSE excluded.local_path END,
+            last_error=excluded.last_error
+    )"));
+    q.addBindValue(record.albumId);
+    q.addBindValue(record.slug);
+    q.addBindValue(record.title);
+    q.addBindValue(record.catalog);
+    q.addBindValue(record.classification);
+    q.addBindValue(record.released);
+    q.addBindValue(record.pageUrl);
+    q.addBindValue(record.torrentUrl);
+    q.addBindValue(record.httpHomepage);
+    q.addBindValue(joinList(record.zipMirrors));
+    q.addBindValue(record.ocrPublished ? 1 : 0);
+    q.addBindValue(record.status.isEmpty() ? QStringLiteral("available") : record.status);
+    q.addBindValue(record.localPath);
+    q.addBindValue(record.lastError);
+    q.exec();
 }
 
 AlbumRecord CatalogStore::album(int albumId) const
@@ -338,7 +426,8 @@ QVector<AlbumRecord> CatalogStore::albumsNeedingDownload() const
     QVector<AlbumRecord> out;
     QSqlQuery q(db());
     q.exec(QStringLiteral(
-        "SELECT * FROM albums WHERE ocr_published=1 AND status NOT IN ('downloaded', 'catalog-only') ORDER BY album_id"));
+        "SELECT * FROM albums WHERE ocr_published=1 AND status NOT IN ('downloaded', 'catalog-only', 'in-torrent') "
+        "ORDER BY album_id"));
     while (q.next())
         out.push_back(albumFromQuery(q));
     return out;
@@ -355,6 +444,13 @@ int CatalogStore::albumDownloadedCount() const
 {
     QSqlQuery q(db());
     q.exec(QStringLiteral("SELECT COUNT(*) FROM albums WHERE status='downloaded'"));
+    return q.next() ? q.value(0).toInt() : 0;
+}
+
+int CatalogStore::albumTorrentCoveredCount() const
+{
+    QSqlQuery q(db());
+    q.exec(QStringLiteral("SELECT COUNT(*) FROM albums WHERE status='in-torrent'"));
     return q.next() ? q.value(0).toInt() : 0;
 }
 
@@ -389,7 +485,9 @@ void CatalogStore::markExistingFiles(const QString &libraryPath)
     auto remixesAll = remixes();
     for (auto &r : remixesAll) {
         if (!r.localPath.isEmpty() && QFileInfo::exists(r.localPath)) {
-            r.status = QStringLiteral("downloaded");
+            r.status = r.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
+                ? QStringLiteral("in-torrent")
+                : QStringLiteral("downloaded");
             updateRemix(r);
             continue;
         }
@@ -408,7 +506,9 @@ void CatalogStore::markExistingFiles(const QString &libraryPath)
     auto albumsAll = albums();
     for (auto &a : albumsAll) {
         if (!a.localPath.isEmpty() && QFileInfo::exists(a.localPath)) {
-            a.status = QStringLiteral("downloaded");
+            a.status = a.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
+                ? QStringLiteral("in-torrent")
+                : QStringLiteral("downloaded");
             updateAlbum(a);
             continue;
         }
