@@ -10,6 +10,10 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Sql Concurrent Svg)
 find_package(Qt6 COMPONENTS Multimedia QUIET)
 find_package(Qt6 COMPONENTS Test QUIET)
+find_package(PkgConfig QUIET)
+if (PKG_CONFIG_FOUND)
+    pkg_check_modules(LIBTORRENT QUIET IMPORTED_TARGET libtorrent-rasterbar)
+endif()
 
 set(OCR_SOURCES
     src/main.cpp
@@ -20,6 +24,8 @@ set(OCR_SOURCES
     src/CatalogSync.cpp
     src/DownloadQueue.cpp
     src/DesktopIntegrator.cpp
+    src/OfficialTorrentPolicy.cpp
+    src/OfficialTorrentEngine.cpp
     src/MainWindow.cpp
     src/resources.qrc
 )
@@ -36,6 +42,13 @@ target_link_libraries(OCRCatalog PRIVATE
 if (TARGET Qt6::Multimedia)
     target_compile_definitions(OCRCatalog PRIVATE OCRCATALOG_HAS_MULTIMEDIA)
     target_link_libraries(OCRCatalog PRIVATE Qt6::Multimedia)
+endif()
+if (TARGET PkgConfig::LIBTORRENT)
+    target_compile_definitions(OCRCatalog PRIVATE OCRCATALOG_HAS_TORRENT)
+    target_link_libraries(OCRCatalog PRIVATE PkgConfig::LIBTORRENT)
+    message(STATUS "In-app official torrents: libtorrent-rasterbar")
+else()
+    message(STATUS "In-app official torrents: disabled (libtorrent-rasterbar not found)")
 endif()
 
 set_target_properties(OCRCatalog PROPERTIES

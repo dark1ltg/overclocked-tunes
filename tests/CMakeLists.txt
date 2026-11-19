@@ -1,6 +1,7 @@
 set(TEST_SOURCES
     test_parsers.cpp
     ../src/HtmlParsers.cpp
+    ../src/OfficialTorrentPolicy.cpp
 )
 
 add_executable(test_parsers ${TEST_SOURCES})

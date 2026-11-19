@@ -21,6 +21,9 @@ public:
     bool openTorrents() const;
     void setOpenTorrents(bool value);
 
+    bool downloadOfficialTorrentsInApp() const;
+    void setDownloadOfficialTorrentsInApp(bool value);
+
     int requestDelayMs() const;
     void setRequestDelayMs(int value);
 

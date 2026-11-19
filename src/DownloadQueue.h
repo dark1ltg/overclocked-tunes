@@ -8,6 +8,8 @@
 #include <QVector>
 #include <atomic>
 
+class OfficialTorrentEngine;
+
 class DownloadQueue : public QObject {
     Q_OBJECT
 public:
@@ -17,6 +19,8 @@ public:
     void setDelayMs(int ms) { m_delayMs = ms; }
     void setPreferTorrents(bool value) { m_preferTorrents = value; }
     void setIncludeAlbums(bool value) { m_includeAlbums = value; }
+    void setDownloadInApp(bool value) { m_downloadInApp = value; }
+    void setTorrentEngine(OfficialTorrentEngine *engine) { m_engine = engine; }
     void enqueueRemixes(const QVector<RemixRecord> &records);
     void enqueueAlbums(const QVector<AlbumRecord> &records);
     void cancel() { m_cancel = true; }
@@ -41,11 +45,15 @@ private:
     bool downloadAlbum(AlbumRecord record);
     QString filenameFromUrl(const QString &url) const;
     QString torrentDir() const;
+    QString collectionDir() const;
+    void maybeStartInAppTorrent(const QString &sourceUrl, const QString &torrentFile);
 
     QString m_libraryPath;
     int m_delayMs = 400;
     bool m_preferTorrents = true;
     bool m_includeAlbums = true;
+    bool m_downloadInApp = true;
+    OfficialTorrentEngine *m_engine = nullptr;
     std::atomic<bool> m_cancel{false};
     std::atomic<bool> m_running{false};
     QVector<RemixRecord> m_remixes;
