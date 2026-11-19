@@ -8,7 +8,16 @@ ARCH="$(uname -m)"
 APPDIR="${BUILD}/AppDir"
 
 mkdir -p "${BUILD}" "${DIST}" "${APPDIR}"
-cmake -S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+# Prefer g++ when /usr/bin/c++ is clang without libstdc++ (common in this environment).
+CXX_COMPILER="${CXX:-}"
+if [[ -z "${CXX_COMPILER}" && -x /usr/bin/g++ ]]; then
+  CXX_COMPILER=/usr/bin/g++
+fi
+CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr)
+if [[ -n "${CXX_COMPILER}" ]]; then
+  CMAKE_ARGS+=(-DCMAKE_CXX_COMPILER="${CXX_COMPILER}")
+fi
+cmake "${CMAKE_ARGS[@]}"
 cmake --build "${BUILD}" -j"$(nproc)"
 DESTDIR="${APPDIR}" cmake --install "${BUILD}"
 
