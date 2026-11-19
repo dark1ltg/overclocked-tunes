@@ -80,22 +80,34 @@ QStringList preferMirrors(QStringList urls)
 
 int parseListedCount(const QString &html, const QString &label)
 {
-    QRegularExpression re(QStringLiteral("%1 \\(([0-9,]+)\\)").arg(QRegularExpression::escape(label)));
+    QRegularExpression re(QStringLiteral("%1 \\(([0-9,\\s\\x{00a0}]+)\\)").arg(QRegularExpression::escape(label)));
     const QString raw = firstCapture(html, re);
     if (raw.isEmpty())
         return 0;
     bool ok = false;
-    const int n = QString(raw).remove(QLatin1Char(',')).toInt(&ok);
+    QString digits = raw;
+    digits.remove(QLatin1Char(','));
+    digits.remove(QLatin1Char(' '));
+    digits.remove(QChar(0x00a0));
+    const int n = digits.toInt(&ok);
     return ok ? n : 0;
 }
 
 int parseLastOffset(const QString &html)
 {
-    QRegularExpression re = rx(R"re(offset=(\d+)[^>]*title="last page")re");
-    const QString raw = firstCapture(html, re);
+    QRegularExpression lastRe = rx(R"re(offset=(\d+)[^>]*title="last page")re");
+    const QString raw = firstCapture(html, lastRe);
     bool ok = false;
-    const int n = raw.toInt(&ok);
-    return ok ? n : 0;
+    const int last = raw.toInt(&ok);
+    if (ok)
+        return last;
+
+    int maxOff = 0;
+    QRegularExpression offRe = rx(R"re([?&]offset=(\d+))re");
+    auto it = offRe.globalMatch(html);
+    while (it.hasNext())
+        maxOff = qMax(maxOff, it.next().captured(1).toInt());
+    return maxOff;
 }
 
 QVector<RemixRecord> parseRemixList(const QString &html)
@@ -103,7 +115,7 @@ QVector<RemixRecord> parseRemixList(const QString &html)
     QVector<RemixRecord> out;
     const QString marker = QStringLiteral("class=\"area-link\"");
     int pos = 0;
-    QRegularExpression idRe = rx("/remix/(OCR(\\d{5}))");
+    QRegularExpression idRe = rx("/remix/(OCR(\\d{5,}))");
     QRegularExpression titleRe = rx(R"re(class="main[^"]*"[^>]*>([^<]+)</a>)re");
     QRegularExpression gameRe = rx(R"re(/game/\d+/[^"]+"[^>]*>([^<]+)</a>)re");
     QRegularExpression artistRe = rx(R"re(/artist/\d+/[^"]+"[^>]*>([^<]+)</a>)re");
@@ -163,7 +175,7 @@ RemixRecord parseRemixDetail(const QString &html, const RemixRecord &seed)
         r.title = unescape(firstCapture(html, titleRe));
     }
     if (r.ocrId.isEmpty()) {
-        QRegularExpression idRe = rx("/remix/(OCR(\\d{5}))");
+        QRegularExpression idRe = rx("/remix/(OCR(\\d{5,}))");
         const auto m = idRe.match(html);
         if (m.hasMatch()) {
             r.ocrId = m.captured(1);
@@ -284,8 +296,10 @@ void fillCollectionRange(TorrentListing *listing)
 {
     if (!listing)
         return;
-    QRegularExpression re = rx(R"re((\d+)\s+to\s+(\d+))re");
-    const auto m = re.match(listing->name);
+    QRegularExpression named = rx(R"re((\d+)\s+to\s+(\d+))re");
+    auto m = named.match(listing->name);
+    if (!m.hasMatch())
+        m = rx(R"re((\d+)_to_(\d+))re").match(listing->url + QLatin1Char(' ') + listing->name);
     if (!m.hasMatch())
         return;
     listing->rangeStart = m.captured(1).toInt();

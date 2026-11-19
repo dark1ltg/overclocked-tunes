@@ -1,4 +1,5 @@
 #include "HtmlParsers.h"
+#include "OfficialTorrentPolicy.h"
 
 #include <QFile>
 #include <QTextStream>
@@ -86,6 +87,15 @@ int main(int, char **)
     if (!zips.join(QLatin1Char(' ')).contains(QLatin1String(".zip")))
         return fail(QStringLiteral("zip urls"));
 
+    const auto starters = HtmlParsers::startingCollectionTorrents();
+    if (starters.size() != 2)
+        return fail(QStringLiteral("starting collections %1").arg(starters.size()));
+    if (!starters[0].url.contains(QStringLiteral("1_to_4000")) || starters[0].rangeEnd != 4000)
+        return fail(QStringLiteral("first starting torrent %1").arg(starters[0].url));
+    if (!starters[1].url.contains(QStringLiteral("4001_to_4473")) || starters[1].rangeStart != 4001
+        || starters[1].rangeEnd != 4473)
+        return fail(QStringLiteral("second starting torrent %1").arg(starters[1].url));
+
     const QString torrentsHtml = loadFixture("torrents.html");
     if (torrentsHtml.isEmpty())
         return fail(QStringLiteral("missing torrents.html"));
@@ -106,6 +116,42 @@ int main(int, char **)
     if (!HtmlParsers::preferHttps(QStringLiteral("http://bt.ocremix.org/torrents/x.torrent"))
              .startsWith(QLatin1String("https://")))
         return fail(QStringLiteral("prefer https"));
+
+    const QString officialTorrent =
+        QStringLiteral("https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_1_to_4000_[v20201028].torrent");
+    if (!OfficialTorrentPolicy::isOfficialTorrentUrl(officialTorrent))
+        return fail(QStringLiteral("official collection torrent url"));
+    if (OfficialTorrentPolicy::isOfficialTorrentUrl(QStringLiteral("https://example.com/torrents/other.torrent")))
+        return fail(QStringLiteral("rejected foreign torrent host"));
+    if (OfficialTorrentPolicy::isOfficialTorrentUrl(QStringLiteral("magnet:?xt=urn:btih:abc")))
+        return fail(QStringLiteral("rejected magnet"));
+    if (OfficialTorrentPolicy::isOfficialTorrentUrl(
+            QStringLiteral("https://bt.ocremix.org/files/not-a-torrent.bin")))
+        return fail(QStringLiteral("rejected non-torrent path"));
+    if (!OfficialTorrentPolicy::isOfficialTrackerUrl(QStringLiteral("https://bt.ocremix.org/announce.php")))
+        return fail(QStringLiteral("official https tracker"));
+    if (!OfficialTorrentPolicy::isOfficialTrackerUrl(QStringLiteral("udp://bt.ocremix.org:2710/announce")))
+        return fail(QStringLiteral("official udp tracker"));
+    if (OfficialTorrentPolicy::isOfficialTrackerUrl(QStringLiteral("udp://tracker.opentrackr.org:1337/announce")))
+        return fail(QStringLiteral("rejected third-party tracker"));
+    if (OfficialTorrentPolicy::isOfficialTrackerUrl(QStringLiteral("udp://[2001:db8::1]:2710/announce")))
+        return fail(QStringLiteral("rejected ipv6 third-party tracker"));
+    if (!OfficialTorrentPolicy::isOfficialTrackerUrl(QStringLiteral("http://bt.ocremix.org/announce")))
+        return fail(QStringLiteral("official ipv4 tracker"));
+
+    TorrentListing fromUrl;
+    fromUrl.url = QStringLiteral("https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_4474_to_5000.torrent");
+    HtmlParsers::fillCollectionRange(&fromUrl);
+    if (fromUrl.rangeStart != 4474 || fromUrl.rangeEnd != 5000)
+        return fail(QStringLiteral("range from url %1-%2").arg(fromUrl.rangeStart).arg(fromUrl.rangeEnd));
+
+    const QString sixDigit = QStringLiteral(
+        "<tr><td><a class=\"area-link\" href=\"/remix/OCR100000\">x</a>"
+        "<a class=\"main\" href=\"/remix/OCR100000\">Six Digit</a>"
+        "<a href=\"/game/1/test\">Test Game</a></td></tr>");
+    const auto six = HtmlParsers::parseRemixList(sixDigit);
+    if (six.size() != 1 || six.first().ocrId != QStringLiteral("OCR100000") || six.first().ocrNumber != 100000)
+        return fail(QStringLiteral("six digit ocr id"));
 
     QTextStream(stdout) << "parser tests OK (" << remixes.size() << " remixes, "
                         << albums.size() << " albums, torrents through OCR"
