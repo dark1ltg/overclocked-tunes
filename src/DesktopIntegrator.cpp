@@ -87,20 +87,23 @@ bool DesktopIntegrator::install(QString *error)
                 iconDir + QStringLiteral("/scalable/apps/") + QString::fromLatin1(AppInfo::id())
                     + QStringLiteral(".svg"));
 
-    const QString desktop = QStringLiteral(
+    QString desktop = QStringLiteral(
         "[Desktop Entry]\n"
         "Type=Application\n"
         "Version=1.0\n"
         "Name=OCR Catalog\n"
         "Comment=Catalog and download OC ReMix songs and albums\n"
-        "Exec=\"%1\"\n"
-        "TryExec=%1\n"
-        "Icon=%2\n"
+        "Exec=\"@EXEC@\"\n"
+        "Icon=@ICON@\n"
         "Terminal=false\n"
         "StartupNotify=true\n"
         "StartupWMClass=OCRCatalog\n"
         "Categories=AudioVideo;Audio;Qt;\n"
         "Keywords=OCRemix;OC ReMix;VGM;remix;\n");
+    if (!dest.contains(QLatin1Char(' ')))
+        desktop += QStringLiteral("TryExec=@EXEC@\n");
+    desktop.replace(QStringLiteral("@EXEC@"), dest);
+    desktop.replace(QStringLiteral("@ICON@"), QString::fromLatin1(AppInfo::id()));
 
     QDir().mkpath(QFileInfo(desktopFilePath()).absolutePath());
     QFile file(desktopFilePath());
@@ -109,7 +112,7 @@ bool DesktopIntegrator::install(QString *error)
             *error = QStringLiteral("Could not write %1").arg(desktopFilePath());
         return false;
     }
-    file.write(desktop.arg(dest, QString::fromLatin1(AppInfo::id())).toUtf8());
+    file.write(desktop.toUtf8());
     file.close();
     refreshMenus();
     return true;
@@ -127,8 +130,8 @@ bool DesktopIntegrator::uninstall(QString *error)
 void DesktopIntegrator::refreshMenus()
 {
     const QString apps = QDir::homePath() + QStringLiteral("/.local/share/applications");
-    QProcess::execute(QStringLiteral("update-desktop-database"), {apps});
-    QProcess::execute(QStringLiteral("xdg-desktop-menu"), {QStringLiteral("forceupdate")});
-    QProcess::execute(QStringLiteral("gtk-update-icon-cache"),
-                      {QDir::homePath() + QStringLiteral("/.local/share/icons/hicolor")});
+    QProcess::startDetached(QStringLiteral("update-desktop-database"), {apps});
+    QProcess::startDetached(QStringLiteral("xdg-desktop-menu"), {QStringLiteral("forceupdate")});
+    QProcess::startDetached(QStringLiteral("gtk-update-icon-cache"),
+                            {QDir::homePath() + QStringLiteral("/.local/share/icons/hicolor")});
 }
