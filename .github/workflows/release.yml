@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools libqt6sql6-sqlite \
+            qt6-svg-dev qt6-multimedia-dev cmake ninja-build g++ libgl1-mesa-dev \
+            libfuse2 desktop-file-utils
+      - name: Generate icon
+        run: python3 packaging/linux/generate-icon.py
+      - name: Build AppImage
+        env:
+          LINUXDEPLOY_OUTPUT_VERSION: ${{ github.ref_name }}
+        run: |
+          chmod +x packaging/linux/build-appimage.sh
+          ./packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          archives: "qtbase qtsvg qtmultimedia qttools"
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+          New-Item -ItemType Directory -Force dist, build/stage | Out-Null
+          $exe = "build/Release/OCRCatalog.exe"
+          if (-not (Test-Path $exe)) { $exe = "build/OCRCatalog.exe" }
+          Copy-Item $exe build/stage/OCRCatalog.exe
+          windeployqt --release --compiler-runtime build/stage/OCRCatalog.exe
+          Compress-Archive -Path build/stage/* -DestinationPath dist/OCRCatalog-windows.zip
+      - name: NSIS installer
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          $stage = (Resolve-Path build/stage).Path
+          $out = (Resolve-Path dist).Path
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DSTAGE=$stage" "/DOUT=$out" packaging/windows/installer.nsi
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          archives: "qtbase qtsvg qtmultimedia qttools"
+      - name: Build DMG
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          macdeployqt build/OCRCatalog.app -dmg
+          mkdir -p dist
+          cp build/OCRCatalog.dmg dist/OCRCatalog-macos.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+
+  publish:
+    needs: [linux, windows, macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
