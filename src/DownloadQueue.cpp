@@ -6,11 +6,16 @@
 #include "appinfo.h"
 
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QRunnable>
 #include <QThread>
+#include <QThreadPool>
+#include <QTimer>
 #include <QtGlobal>
 #include <QUrl>
+#include <algorithm>
 
 DownloadQueue::DownloadQueue(QObject *parent)
     : QObject(parent)
@@ -43,18 +48,19 @@ QString DownloadQueue::collectionDir() const
     return m_libraryPath + QStringLiteral("/collections");
 }
 
-void DownloadQueue::maybeStartInAppTorrent(const QString &sourceUrl, const QString &torrentFile)
+bool DownloadQueue::maybeStartInAppTorrent(const QString &sourceUrl, const QString &torrentFile)
 {
     if (!m_downloadInApp || !m_engine || !OfficialTorrentEngine::available())
-        return;
+        return false;
     QDir().mkpath(collectionDir());
-    m_engine->addOfficialTorrent(sourceUrl, torrentFile, collectionDir());
+    return m_engine->addOfficialTorrent(sourceUrl, torrentFile, collectionDir());
 }
 
 void DownloadQueue::start()
 {
+    if (m_running.exchange(true))
+        return;
     m_cancel = false;
-    m_running = true;
 
     if (m_preferTorrents) {
         emit queueProgress(0, 0, tr("Starting with official collection torrents OCR 1–4000 and 4001–4473…"));
@@ -68,26 +74,20 @@ void DownloadQueue::start()
     }
 
     const int total = m_remixes.size() + m_albums.size();
-    int done = 0;
     if (total == 0) {
         m_running = false;
         emit finished(true, tr("Nothing left after official torrents. Remaining items are already covered or on disk."));
         return;
     }
 
-    for (auto record : m_remixes) {
-        if (m_cancel)
-            break;
-        emit queueProgress(done, total, tr("Downloading %1").arg(record.ocrId));
-        downloadRemix(record);
-        ++done;
-        if (!m_cancel)
-            QThread::msleep(static_cast<unsigned long>(m_delayMs));
-    }
+    downloadRemixes();
+
+    int done = 0;
+    const int albumTotal = m_albums.size();
     for (auto record : m_albums) {
         if (m_cancel)
             break;
-        emit queueProgress(done, total, tr("Downloading album %1").arg(record.title));
+        emit queueProgress(done, albumTotal, tr("Downloading album %1").arg(record.title));
         downloadAlbum(record);
         ++done;
         if (!m_cancel)
@@ -100,9 +100,62 @@ void DownloadQueue::start()
     emit finished(!m_cancel, m_cancel ? tr("Downloads cancelled.") : tr("Downloads finished."));
 }
 
+void DownloadQueue::downloadRemixes()
+{
+    if (m_remixes.isEmpty())
+        return;
+    const int total = m_remixes.size();
+    const int workers = std::clamp(m_concurrency, 1, 3);
+    if (workers <= 1) {
+        int done = 0;
+        for (const auto &record : m_remixes) {
+            if (m_cancel)
+                break;
+            emit queueProgress(done, total, tr("Downloading %1").arg(record.ocrId));
+            downloadRemix(record);
+            ++done;
+            if (!m_cancel)
+                QThread::msleep(static_cast<unsigned long>(m_delayMs));
+        }
+        return;
+    }
+
+    QThreadPool pool;
+    pool.setMaxThreadCount(workers);
+    std::atomic<int> remaining{0};
+    std::atomic<int> finishedCount{0};
+    for (const auto &record : m_remixes) {
+        if (m_cancel)
+            break;
+        remaining.fetch_add(1);
+        const RemixRecord copy = record;
+        pool.start(QRunnable::create([this, copy, total, &remaining, &finishedCount]() {
+            downloadRemix(copy);
+            const int done = finishedCount.fetch_add(1) + 1;
+            remaining.fetch_sub(1);
+            emit queueProgress(done, total, tr("Downloading %1").arg(copy.ocrId));
+        }));
+        QThread::msleep(static_cast<unsigned long>(m_delayMs));
+    }
+
+    QEventLoop loop;
+    QTimer tick;
+    tick.setInterval(100);
+    QObject::connect(&tick, &QTimer::timeout, &loop, [this, &pool, &remaining, &loop]() {
+        if (m_cancel)
+            pool.clear();
+        if (remaining.load() <= 0 && pool.activeThreadCount() == 0)
+            loop.quit();
+    });
+    tick.start();
+    loop.exec();
+    pool.waitForDone(1000);
+}
+
 bool DownloadQueue::applyOfficialTorrents()
 {
     HttpClient http;
+    http.setCancelFlag(&m_cancel);
     QVector<TorrentListing> collections = HtmlParsers::startingCollectionTorrents();
     QVector<TorrentListing> listings;
 
@@ -114,8 +167,6 @@ bool DownloadQueue::applyOfficialTorrents()
         for (const auto &starter : collections)
             coveredEnd = qMax(coveredEnd, starter.rangeEnd);
         for (const auto &extra : HtmlParsers::summarizeTorrentCoverage(listings).collections) {
-            if (extra.rangeStart <= coveredEnd)
-                continue;
             bool seen = false;
             for (const auto &existing : collections) {
                 if (existing.url == extra.url) {
@@ -123,8 +174,14 @@ bool DownloadQueue::applyOfficialTorrents()
                     break;
                 }
             }
-            if (!seen)
-                collections.push_back(extra);
+            if (seen)
+                continue;
+            const bool extendsCoverage = extra.rangeEnd > coveredEnd;
+            const bool afterCoverage = extra.rangeStart > coveredEnd;
+            if (!extendsCoverage && !afterCoverage && extra.rangeEnd > 0)
+                continue;
+            collections.push_back(extra);
+            coveredEnd = qMax(coveredEnd, extra.rangeEnd);
         }
     } else {
         emit queueProgress(0, 0,
@@ -159,15 +216,24 @@ bool DownloadQueue::applyOfficialTorrents()
             if (!ok)
                 job.error = result.error;
         }
+        bool inAppOk = true;
         if (ok) {
             if (!existed)
                 saved << dest;
-            job.status = QStringLiteral("done");
-            if (collection.rangeEnd >= collection.rangeStart && collection.rangeEnd > 0)
+            if (m_downloadInApp && OfficialTorrentEngine::available())
+                inAppOk = maybeStartInAppTorrent(collection.url, dest);
+            if (inAppOk && collection.rangeEnd >= collection.rangeStart && collection.rangeEnd > 0) {
                 covered.push_back({collection.rangeStart, collection.rangeEnd});
-            const QString note = tr("Covered by official collection torrent: %1").arg(collection.name);
-            emit remixRangeCovered(collection.rangeStart, collection.rangeEnd, note);
-            maybeStartInAppTorrent(collection.url, dest);
+                const QString note = tr("Covered by official collection torrent: %1").arg(collection.name);
+                emit remixRangeCovered(collection.rangeStart, collection.rangeEnd, note);
+                job.status = QStringLiteral("done");
+            } else if (!inAppOk) {
+                job.status = QStringLiteral("error");
+                if (job.error.isEmpty())
+                    job.error = tr("In-app torrent was rejected; those tracks will use HTTPS mirrors.");
+            } else {
+                job.status = QStringLiteral("done");
+            }
         } else {
             job.status = QStringLiteral("error");
         }
@@ -219,11 +285,12 @@ bool DownloadQueue::downloadRemix(RemixRecord record)
     DownloadJob job;
     job.kind = DownloadJob::Remix;
     job.itemId = record.ocrId;
-    job.displayName = record.ocrId + QStringLiteral(" \u2014 ") + record.title;
+    job.displayName = record.ocrId + QStringLiteral(" — ") + record.title;
     job.status = QStringLiteral("running");
     emit jobUpdated(job);
 
     HttpClient http;
+    http.setCancelFlag(&m_cancel);
     if (record.mirrors.isEmpty()) {
         const auto page = http.get(record.pageUrl);
         if (page.status == 404) {
@@ -277,7 +344,7 @@ bool DownloadQueue::downloadRemix(RemixRecord record)
             break;
         job.displayName = fileName;
         emit jobUpdated(job);
-        const auto result = http.downloadToFile(mirror, dest, 0, [&](qint64 done, qint64 total) {
+        const auto result = http.downloadToFile(mirror, dest, 120000, [&](qint64 done, qint64 total) {
             job.bytesDone = done;
             job.bytesTotal = total;
             emit jobUpdated(job);
@@ -323,6 +390,7 @@ bool DownloadQueue::downloadAlbum(AlbumRecord record)
     }
 
     HttpClient http;
+    http.setCancelFlag(&m_cancel);
     if (record.torrentUrl.isEmpty() || record.httpHomepage.isEmpty()) {
         const auto page = http.get(record.pageUrl);
         if (page.ok) {
@@ -359,8 +427,12 @@ bool DownloadQueue::downloadAlbum(AlbumRecord record)
         record.localPath = dest;
         record.status = QStringLiteral("in-torrent");
         if (m_downloadInApp && OfficialTorrentEngine::available()) {
+            if (!maybeStartInAppTorrent(record.torrentUrl, dest)) {
+                record.status = QStringLiteral("error");
+                record.lastError = tr("In-app album torrent was rejected.");
+                return false;
+            }
             record.lastError = tr("Downloading official album torrent inside OCR Catalog.");
-            maybeStartInAppTorrent(record.torrentUrl, dest);
         } else {
             record.lastError = tr("Saved official album torrent. Open it in a BitTorrent client "
                                   "(qBittorrent, Transmission, Deluge).");
@@ -398,7 +470,7 @@ bool DownloadQueue::downloadAlbum(AlbumRecord record)
         for (const auto &mirror : HtmlParsers::preferMirrors(record.zipMirrors)) {
             if (m_cancel)
                 break;
-            const auto result = http.downloadToFile(mirror, dest, 0, [&](qint64 done, qint64 total) {
+            const auto result = http.downloadToFile(mirror, dest, 180000, [&](qint64 done, qint64 total) {
                 job.bytesDone = done;
                 job.bytesTotal = total;
                 emit jobUpdated(job);
