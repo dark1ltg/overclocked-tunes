@@ -26,6 +26,7 @@ bool isOcrPublishedAlbum(const AlbumRecord &album);
 QString preferHttps(QString url);
 QString normalizeKey(QString text);
 void fillCollectionRange(TorrentListing *listing);
+QVector<TorrentListing> startingCollectionTorrents();
 QVector<TorrentListing> parseTorrentList(const QString &html);
 TorrentCoverage summarizeTorrentCoverage(const QVector<TorrentListing> &listings);
 const TorrentListing *matchAlbumTorrent(const AlbumRecord &album, const QVector<TorrentListing> &listings);
