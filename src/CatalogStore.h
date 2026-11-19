@@ -22,6 +22,8 @@ public:
     QVector<RemixRecord> remixesNeedingDownload() const;
     int remixCount() const;
     int remixDownloadedCount() const;
+    int remixTorrentCoveredCount() const;
+    void markRemixesInTorrentRange(int from, int to, const QString &note);
 
     void upsertAlbums(const QVector<AlbumRecord> &records);
     void updateAlbum(const AlbumRecord &record);
@@ -30,6 +32,7 @@ public:
     QVector<AlbumRecord> albumsNeedingDownload() const;
     int albumCount() const;
     int albumDownloadedCount() const;
+    int albumTorrentCoveredCount() const;
 
     void setMeta(const QString &key, const QString &value);
     QString meta(const QString &key) const;

@@ -10,9 +10,9 @@ OCR Catalog is not affiliated with OverClocked ReMix. It only uses download link
 
 - Syncs the public ReMix list (`/remixes/`) and album list (`/albums/`) into a local SQLite catalog
 - Search by title, game, artist, or OCR ID
-- Download selected items, or everything still missing
-- ReMix MP3s come from official mirrors (`ocr.blueblue.fr`, `iterations.org`, `ocrmirror.org`), with fallback
-- Official albums (`OCRA` / `OCRI` / `OCRC`) download as ZIP when the album site lists one; otherwise the `.torrent` is saved
+- **Download missing** starts with official OC ReMix collection torrents (currently OCR 1–4000 and 4001–4473), then HTTPS mirrors only for remixes after that cutoff and albums those torrents do not list
+- Selected items still fetch from the site's HTTPS mirrors when you ask for a specific track
+- Official albums (`OCRA` / `OCRI` / `OCRC`) prefer the tracker `.torrent`; ZIP mirrors are used only when no torrent exists
 - Skips files you already have
 - Optional local playback of downloaded MP3s
 - On Linux AppImage: **Install to application menu** so it appears in KDE Plasma, GNOME, and other Freedesktop desktops
@@ -110,9 +110,11 @@ After you pick a library folder:
 
 ```
 library/
-  remixes/     official MP3 filenames
-  albums/      ZIP files when HTTP mirrors exist
-  torrents/    .torrent files when that is the published option
+  remixes/     official MP3 filenames (HTTPS mirrors, OCR after the collection cutoff)
+  albums/      ZIP files when you choose a specific album and a ZIP mirror exists
+  torrents/    official collection .torrents (OCR 1–4473) plus album .torrents
 ```
+
+The app does not embed a BitTorrent client. Collection torrents can be opened in qBittorrent, Transmission, Deluge, or the desktop default. Album torrents are saved without opening dozens of them at once.
 
 The local catalog database is stored in the Qt app-data directory, not in the library folder.

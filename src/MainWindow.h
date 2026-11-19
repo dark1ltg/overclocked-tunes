@@ -5,6 +5,7 @@
 
 #include <QMainWindow>
 #include <QPointer>
+#include <QStringList>
 #include <QThread>
 
 class QLabel;
@@ -48,6 +49,9 @@ private slots:
     void onSyncFinished(bool ok, const QString &message);
     void onDownloadFinished(bool ok, const QString &message);
     void maybeOfferMenuInstall();
+    void onRemixRangeCovered(int from, int to, const QString &note);
+    void onTorrentsReady(const QStringList &paths);
+    void onCoverageSummary(int lastOcr, int collectionTracks, int remainingRemixes, int remainingAlbums);
 
 private:
     void buildUi();

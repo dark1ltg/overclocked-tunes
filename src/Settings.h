@@ -15,6 +15,12 @@ public:
     bool includeAlbums() const;
     void setIncludeAlbums(bool value);
 
+    bool preferTorrents() const;
+    void setPreferTorrents(bool value);
+
+    bool openTorrents() const;
+    void setOpenTorrents(bool value);
+
     int requestDelayMs() const;
     void setRequestDelayMs(int value);
 

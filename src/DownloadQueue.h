@@ -4,6 +4,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <atomic>
 
@@ -14,6 +15,8 @@ public:
 
     void setLibraryPath(const QString &path) { m_libraryPath = path; }
     void setDelayMs(int ms) { m_delayMs = ms; }
+    void setPreferTorrents(bool value) { m_preferTorrents = value; }
+    void setIncludeAlbums(bool value) { m_includeAlbums = value; }
     void enqueueRemixes(const QVector<RemixRecord> &records);
     void enqueueAlbums(const QVector<AlbumRecord> &records);
     void cancel() { m_cancel = true; }
@@ -26,16 +29,23 @@ signals:
     void jobUpdated(const DownloadJob &job);
     void remixUpdated(const RemixRecord &record);
     void albumUpdated(const AlbumRecord &record);
+    void remixRangeCovered(int from, int to, const QString &note);
+    void torrentsReady(const QStringList &paths);
+    void coverageSummary(int lastOcr, int collectionTracks, int remainingRemixes, int remainingAlbums);
     void queueProgress(int done, int total, const QString &message);
     void finished(bool ok, const QString &message);
 
 private:
+    bool applyOfficialTorrents();
     bool downloadRemix(RemixRecord record);
     bool downloadAlbum(AlbumRecord record);
     QString filenameFromUrl(const QString &url) const;
+    QString torrentDir() const;
 
     QString m_libraryPath;
     int m_delayMs = 400;
+    bool m_preferTorrents = true;
+    bool m_includeAlbums = true;
     std::atomic<bool> m_cancel{false};
     std::atomic<bool> m_running{false};
     QVector<RemixRecord> m_remixes;

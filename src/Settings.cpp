@@ -39,6 +39,26 @@ void Settings::setIncludeAlbums(bool value)
     QSettings().setValue(QStringLiteral("includeAlbums"), value);
 }
 
+bool Settings::preferTorrents() const
+{
+    return QSettings().value(QStringLiteral("preferTorrents"), true).toBool();
+}
+
+void Settings::setPreferTorrents(bool value)
+{
+    QSettings().setValue(QStringLiteral("preferTorrents"), value);
+}
+
+bool Settings::openTorrents() const
+{
+    return QSettings().value(QStringLiteral("openTorrents"), true).toBool();
+}
+
+void Settings::setOpenTorrents(bool value)
+{
+    QSettings().setValue(QStringLiteral("openTorrents"), value);
+}
+
 int Settings::requestDelayMs() const
 {
     return std::clamp(QSettings().value(QStringLiteral("requestDelayMs"), 400).toInt(), 250, 2000);
