@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.ocrcatalog.OCRCatalog</id>
+  <name>OCR Catalog</name>
+  <summary>Catalog and download OC ReMix songs and albums</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>OCR Catalog</developer_name>
+  <description>
+    <p>
+      OCR Catalog is a desktop app that lists publicly posted OverClocked ReMix
+      songs and official OC ReMix albums, then downloads them from the same
+      HTTP mirrors the website already publishes.
+    </p>
+    <p>
+      It is not affiliated with OverClocked ReMix. Please keep request rates
+      polite. For a first-time full back-catalog, OC ReMix recommends their
+      official BitTorrent collections.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.ocrcatalog.OCRCatalog.desktop</launchable>
+  <url type="homepage">https://github.com/dark1ltg/overclocked-tunes</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+  <provides>
+    <binary>OCRCatalog</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>

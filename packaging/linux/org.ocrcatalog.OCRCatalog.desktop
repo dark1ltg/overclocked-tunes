@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OCR Catalog
+GenericName=OC ReMix catalog
+Comment=Catalog and download OC ReMix songs and albums
+Exec=OCRCatalog
+Icon=org.ocrcatalog.OCRCatalog
+Terminal=false
+StartupNotify=true
+StartupWMClass=OCRCatalog
+Categories=AudioVideo;Audio;Qt;
+Keywords=OCRemix;OC ReMix;VGM;remix;videogame;
+X-AppImage-Name=OCRCatalog
+X-AppImage-Version=1.0.0
+X-AppImage-Arch=x86_64
