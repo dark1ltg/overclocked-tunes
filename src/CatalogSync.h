@@ -13,7 +13,8 @@ public:
     explicit CatalogSync(QObject *parent = nullptr);
 
     void setDelayMs(int ms) { m_delayMs = ms; }
-    void cancel() { m_cancel = true; }
+    void cancel();
+    bool isRunning() const { return m_running; }
 
 public slots:
     void start();
@@ -25,7 +26,8 @@ signals:
     void finished(bool ok, const QString &message);
 
 private:
-    bool fetchPages(const QString &listUrl, bool albums);
+    bool fetchPages(const QString &listUrl, bool albums, int *outGot, int *outListed);
     int m_delayMs = 400;
     std::atomic<bool> m_cancel{false};
+    std::atomic<bool> m_running{false};
 };

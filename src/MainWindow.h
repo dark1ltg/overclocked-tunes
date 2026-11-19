@@ -12,10 +12,12 @@ class QLabel;
 class QLineEdit;
 class QProgressBar;
 class QTableWidget;
+class QTableWidgetItem;
 class QTextEdit;
 class QTabWidget;
 class CatalogSync;
 class DownloadQueue;
+class OfficialTorrentEngine;
 
 #ifdef OCRCATALOG_HAS_MULTIMEDIA
 class QMediaPlayer;
@@ -28,7 +30,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    bool ready() { return m_store.open(); }
+    bool ready();
     QString storeError() const { return m_store.lastError(); }
 
 private slots:
@@ -52,21 +54,32 @@ private slots:
     void onRemixRangeCovered(int from, int to, const QString &note);
     void onTorrentsReady(const QStringList &paths);
     void onCoverageSummary(int lastOcr, int collectionTracks, int remainingRemixes, int remainingAlbums);
+    void onTorrentCompleted(const QString &name, const QString &savePath);
 
 private:
     void buildUi();
+    void setupWorkers();
+    void shutdownWorkers();
     void reloadTables();
     void fillRemixTable();
     void fillAlbumTable();
+    void applyRemixToTable(const RemixRecord &record);
+    void applyAlbumToTable(const AlbumRecord &record);
     void updateStatus();
     void ensureLibrary();
+    void applyJobToQueueTable(const DownloadJob &job);
     QVector<int> selectedRemixRows() const;
     QVector<int> selectedAlbumRows() const;
+    RemixRecord remixAtRow(int row) const;
+    AlbumRecord albumAtRow(int row) const;
+    QTableWidgetItem *taggedItem(const QString &text, const QString &id) const;
 
     CatalogStore m_store;
     QThread m_worker;
     CatalogSync *m_sync = nullptr;
     DownloadQueue *m_downloads = nullptr;
+    OfficialTorrentEngine *m_torrentEngine = nullptr;
+    bool m_workersStarted = false;
 
     QTabWidget *m_tabs = nullptr;
     QTableWidget *m_remixTable = nullptr;

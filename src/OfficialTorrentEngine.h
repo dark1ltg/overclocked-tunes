@@ -24,16 +24,23 @@ public:
 
 public slots:
     void start();
+    void stop();
+    void cancelActive();
     bool addOfficialTorrent(const QString &sourceUrl, const QString &torrentFile, const QString &savePath);
     void poll();
 
 signals:
     void jobUpdated(const DownloadJob &job);
     void torrentFailed(const QString &name, const QString &error);
+    void torrentCompleted(const QString &name, const QString &savePath);
 
 private:
 #ifdef OCRCATALOG_HAS_TORRENT
+    void writeResumeFile(const QString &savePath, const QString &hashHex, const std::vector<char> &buf);
+    QString resumePath(const QString &savePath, const QString &hashHex) const;
     std::unique_ptr<libtorrent::session> m_session;
     QTimer *m_timer = nullptr;
+    int m_pendingResume = 0;
+    bool m_stopped = false;
 #endif
 };

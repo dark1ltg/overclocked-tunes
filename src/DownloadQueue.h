@@ -17,6 +17,7 @@ public:
 
     void setLibraryPath(const QString &path) { m_libraryPath = path; }
     void setDelayMs(int ms) { m_delayMs = ms; }
+    void setConcurrency(int value) { m_concurrency = value; }
     void setPreferTorrents(bool value) { m_preferTorrents = value; }
     void setIncludeAlbums(bool value) { m_includeAlbums = value; }
     void setDownloadInApp(bool value) { m_downloadInApp = value; }
@@ -43,13 +44,15 @@ private:
     bool applyOfficialTorrents();
     bool downloadRemix(RemixRecord record);
     bool downloadAlbum(AlbumRecord record);
+    void downloadRemixes();
     QString filenameFromUrl(const QString &url) const;
     QString torrentDir() const;
     QString collectionDir() const;
-    void maybeStartInAppTorrent(const QString &sourceUrl, const QString &torrentFile);
+    bool maybeStartInAppTorrent(const QString &sourceUrl, const QString &torrentFile);
 
     QString m_libraryPath;
     int m_delayMs = 400;
+    int m_concurrency = 1;
     bool m_preferTorrents = true;
     bool m_includeAlbums = true;
     bool m_downloadInApp = true;
