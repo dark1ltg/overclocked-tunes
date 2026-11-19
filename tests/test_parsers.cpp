@@ -86,7 +86,29 @@ int main(int, char **)
     if (!zips.join(QLatin1Char(' ')).contains(QLatin1String(".zip")))
         return fail(QStringLiteral("zip urls"));
 
+    const QString torrentsHtml = loadFixture("torrents.html");
+    if (torrentsHtml.isEmpty())
+        return fail(QStringLiteral("missing torrents.html"));
+    const auto torrentList = HtmlParsers::parseTorrentList(torrentsHtml);
+    const auto coverage = HtmlParsers::summarizeTorrentCoverage(torrentList);
+    if (coverage.collections.size() < 2)
+        return fail(QStringLiteral("collection torrents %1").arg(coverage.collections.size()));
+    if (coverage.lastCoveredRemix != 4473)
+        return fail(QStringLiteral("last covered OCR %1").arg(coverage.lastCoveredRemix));
+    if (coverage.collectionTrackCount < 4473)
+        return fail(QStringLiteral("collection tracks %1").arg(coverage.collectionTrackCount));
+    AlbumRecord fall;
+    fall.title = QStringLiteral("Fall & Rise");
+    fall.catalog = QStringLiteral("OCRI-0016");
+    const auto *fallTorrent = HtmlParsers::matchAlbumTorrent(fall, torrentList);
+    if (!fallTorrent || !fallTorrent->url.contains(QStringLiteral("Fall")))
+        return fail(QStringLiteral("album torrent match"));
+    if (!HtmlParsers::preferHttps(QStringLiteral("http://bt.ocremix.org/torrents/x.torrent"))
+             .startsWith(QLatin1String("https://")))
+        return fail(QStringLiteral("prefer https"));
+
     QTextStream(stdout) << "parser tests OK (" << remixes.size() << " remixes, "
-                        << albums.size() << " albums)" << Qt::endl;
+                        << albums.size() << " albums, torrents through OCR"
+                        << coverage.lastCoveredRemix << ")" << Qt::endl;
     return 0;
 }

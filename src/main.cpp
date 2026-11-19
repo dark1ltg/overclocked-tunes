@@ -82,6 +82,22 @@ int runSmoke()
         return 1;
     }
     out << "OK album zip " << zips.first() << Qt::endl;
+
+    const auto torrentsHtml = http.get(QStringLiteral("https://ocremix.org/torrents/"));
+    if (!torrentsHtml.ok) {
+        out << "FAIL torrents page: " << torrentsHtml.error << Qt::endl;
+        return 1;
+    }
+    const auto coverage = HtmlParsers::summarizeTorrentCoverage(
+        HtmlParsers::parseTorrentList(QString::fromUtf8(torrentsHtml.body)));
+    if (coverage.lastCoveredRemix < 4000 || coverage.collections.size() < 2) {
+        out << "FAIL torrent coverage last=" << coverage.lastCoveredRemix
+            << " collections=" << coverage.collections.size() << Qt::endl;
+        return 1;
+    }
+    out << "OK torrents cover through OCR" << coverage.lastCoveredRemix
+        << " (" << coverage.collectionTrackCount << " tracks, "
+        << coverage.albums.size() << " album torrents)" << Qt::endl;
     out << "SMOKE OK" << Qt::endl;
     return 0;
 }

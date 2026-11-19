@@ -2,11 +2,13 @@
 
 #include "HtmlParsers.h"
 #include "HttpClient.h"
+#include "appinfo.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QThread>
+#include <QtGlobal>
 #include <QUrl>
 
 DownloadQueue::DownloadQueue(QObject *parent)
@@ -30,16 +32,32 @@ QString DownloadQueue::filenameFromUrl(const QString &url) const
     return QUrl::fromPercentEncoding(QFileInfo(path).fileName().toUtf8());
 }
 
+QString DownloadQueue::torrentDir() const
+{
+    return m_libraryPath + QStringLiteral("/torrents");
+}
+
 void DownloadQueue::start()
 {
     m_cancel = false;
     m_running = true;
-    HttpClient http;
+
+    if (m_preferTorrents) {
+        emit queueProgress(0, 0, tr("Using official OC ReMix torrents first…"));
+        if (!applyOfficialTorrents() && m_cancel) {
+            m_remixes.clear();
+            m_albums.clear();
+            m_running = false;
+            emit finished(false, tr("Downloads cancelled."));
+            return;
+        }
+    }
+
     const int total = m_remixes.size() + m_albums.size();
     int done = 0;
     if (total == 0) {
         m_running = false;
-        emit finished(true, tr("Nothing to download."));
+        emit finished(true, tr("Nothing left after official torrents. Remaining items are already covered or on disk."));
         return;
     }
 
@@ -66,6 +84,99 @@ void DownloadQueue::start()
     m_albums.clear();
     m_running = false;
     emit finished(!m_cancel, m_cancel ? tr("Downloads cancelled.") : tr("Downloads finished."));
+}
+
+bool DownloadQueue::applyOfficialTorrents()
+{
+    HttpClient http;
+    const QString pageUrl = QStringLiteral("%1/torrents/").arg(QLatin1String(AppInfo::siteRoot()));
+    const auto page = http.get(pageUrl);
+    if (!page.ok) {
+        emit queueProgress(0, 0, tr("Could not read torrents page (%1); falling back to mirrors.").arg(page.error));
+        return true;
+    }
+
+    const auto listings = HtmlParsers::parseTorrentList(QString::fromUtf8(page.body));
+    const auto coverage = HtmlParsers::summarizeTorrentCoverage(listings);
+    QDir().mkpath(torrentDir());
+    QStringList saved;
+
+    int step = 0;
+    const int torrentJobs = qMax(coverage.collections.size(), 1);
+    struct Range { int from = 0; int to = 0; };
+    QVector<Range> covered;
+    for (const auto &collection : coverage.collections) {
+        if (m_cancel)
+            return false;
+        DownloadJob job;
+        job.kind = DownloadJob::CollectionTorrent;
+        job.itemId = QStringLiteral("collection-%1-%2").arg(collection.rangeStart).arg(collection.rangeEnd);
+        job.displayName = collection.name;
+        job.status = QStringLiteral("running");
+        emit jobUpdated(job);
+        emit queueProgress(++step, torrentJobs, tr("Saving collection torrent %1").arg(collection.name));
+
+        const QString dest = torrentDir() + QLatin1Char('/') + filenameFromUrl(collection.url);
+        const bool existed = QFileInfo::exists(dest) && QFileInfo(dest).size() > 0;
+        bool ok = existed;
+        if (!ok) {
+            const auto result = http.downloadToFile(collection.url, dest);
+            ok = result.ok;
+            if (!ok)
+                job.error = result.error;
+        }
+        if (ok) {
+            if (!existed)
+                saved << dest;
+            job.status = QStringLiteral("done");
+            if (collection.rangeEnd >= collection.rangeStart && collection.rangeEnd > 0)
+                covered.push_back({collection.rangeStart, collection.rangeEnd});
+            const QString note = tr("Covered by official collection torrent: %1").arg(collection.name);
+            emit remixRangeCovered(collection.rangeStart, collection.rangeEnd, note);
+        } else {
+            job.status = QStringLiteral("error");
+        }
+        emit jobUpdated(job);
+        QThread::msleep(static_cast<unsigned long>(m_delayMs));
+    }
+
+    QVector<RemixRecord> remainingRemixes;
+    remainingRemixes.reserve(m_remixes.size());
+    for (const auto &r : m_remixes) {
+        bool inRange = false;
+        for (const auto &range : covered) {
+            if (r.ocrNumber >= range.from && r.ocrNumber <= range.to) {
+                inRange = true;
+                break;
+            }
+        }
+        if (!inRange)
+            remainingRemixes.push_back(r);
+    }
+    m_remixes = remainingRemixes;
+
+    if (m_includeAlbums) {
+        for (auto &album : m_albums) {
+            if (album.torrentUrl.isEmpty()) {
+                if (const auto *match = HtmlParsers::matchAlbumTorrent(album, listings))
+                    album.torrentUrl = match->url;
+            } else {
+                album.torrentUrl = HtmlParsers::preferHttps(album.torrentUrl);
+            }
+        }
+    }
+
+    int lastCovered = 0;
+    int trackCount = 0;
+    for (const auto &range : covered) {
+        lastCovered = qMax(lastCovered, range.to);
+        if (range.to >= range.from)
+            trackCount += range.to - range.from + 1;
+    }
+
+    emit torrentsReady(saved);
+    emit coverageSummary(lastCovered, trackCount, m_remixes.size(), m_albums.size());
+    return true;
 }
 
 bool DownloadQueue::downloadRemix(RemixRecord record)
@@ -181,10 +292,11 @@ bool DownloadQueue::downloadAlbum(AlbumRecord record)
         const auto page = http.get(record.pageUrl);
         if (page.ok) {
             HtmlParsers::parseAlbumDetail(&record, QString::fromUtf8(page.body));
+            record.torrentUrl = HtmlParsers::preferHttps(record.torrentUrl);
             emit albumUpdated(record);
         }
     }
-    if (record.zipMirrors.isEmpty() && !record.httpHomepage.isEmpty()) {
+    if (record.zipMirrors.isEmpty() && !record.httpHomepage.isEmpty() && !m_preferTorrents) {
         const auto home = http.get(record.httpHomepage);
         if (home.ok)
             record.zipMirrors = HtmlParsers::parseAlbumZipMirrors(QString::fromUtf8(home.body));
@@ -192,9 +304,44 @@ bool DownloadQueue::downloadAlbum(AlbumRecord record)
     }
 
     const QString albumDir = m_libraryPath + QStringLiteral("/albums");
-    const QString torrentDir = m_libraryPath + QStringLiteral("/torrents");
     QDir().mkpath(albumDir);
-    QDir().mkpath(torrentDir);
+    QDir().mkpath(torrentDir());
+
+    auto saveTorrent = [&]() -> bool {
+        if (record.torrentUrl.isEmpty())
+            return false;
+        const QString torrentName = filenameFromUrl(record.torrentUrl);
+        const QString dest = torrentDir() + QLatin1Char('/') + torrentName;
+        bool ok = QFileInfo::exists(dest) && QFileInfo(dest).size() > 0;
+        if (!ok) {
+            const auto result = http.downloadToFile(record.torrentUrl, dest);
+            ok = result.ok;
+            if (!ok)
+                record.lastError = result.error;
+        }
+        if (!ok)
+            return false;
+        record.localPath = dest;
+        record.status = QStringLiteral("in-torrent");
+        record.lastError = tr("Saved official album torrent. Open it in a BitTorrent client "
+                              "(qBittorrent, Transmission, Deluge).");
+        job.kind = DownloadJob::Torrent;
+        job.status = QStringLiteral("done");
+        job.displayName = torrentName;
+        emit albumUpdated(record);
+        emit jobUpdated(job);
+        return true;
+    };
+
+    if (m_preferTorrents && saveTorrent())
+        return true;
+
+    if (record.zipMirrors.isEmpty() && !record.httpHomepage.isEmpty()) {
+        const auto home = http.get(record.httpHomepage);
+        if (home.ok)
+            record.zipMirrors = HtmlParsers::parseAlbumZipMirrors(QString::fromUtf8(home.body));
+        emit albumUpdated(record);
+    }
 
     if (!record.zipMirrors.isEmpty()) {
         const QString fileName = filenameFromUrl(record.zipMirrors.first());
@@ -231,27 +378,8 @@ bool DownloadQueue::downloadAlbum(AlbumRecord record)
         record.lastError = lastError;
     }
 
-    if (!record.torrentUrl.isEmpty()) {
-        const QString torrentName = filenameFromUrl(record.torrentUrl);
-        const QString dest = torrentDir + QLatin1Char('/') + torrentName;
-        const auto result = http.downloadToFile(record.torrentUrl, dest);
-        if (result.ok) {
-            if (record.localPath.isEmpty())
-                record.localPath = dest;
-            if (record.status != QStringLiteral("downloaded"))
-                record.status = QStringLiteral("available");
-            record.lastError = record.zipMirrors.isEmpty()
-                ? tr("Saved .torrent (no ZIP mirrors found). Open it in a BitTorrent client.")
-                : record.lastError;
-            job.kind = DownloadJob::Torrent;
-            job.status = QStringLiteral("done");
-            job.displayName = torrentName;
-            emit albumUpdated(record);
-            emit jobUpdated(job);
-            return record.status == QStringLiteral("downloaded");
-        }
-        record.lastError = result.error;
-    }
+    if (saveTorrent())
+        return true;
 
     if (record.status != QStringLiteral("downloaded"))
         record.status = QStringLiteral("error");
