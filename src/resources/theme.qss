@@ -80,3 +80,28 @@ QLabel#emptyHint {
     font-size: 15px;
     padding: 32px;
 }
+QCheckBox, QRadioButton {
+    color: #f3e6d4;
+    spacing: 8px;
+}
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    background: #2a1e16;
+    border: 1px solid #5a3b24;
+    border-radius: 3px;
+}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background: #c45c12;
+    border-color: #e07020;
+}
+QMessageBox, QDialog, QDialogButtonBox {
+    background: #16110d;
+    color: #f3e6d4;
+}
+QMessageBox QLabel, QDialog QLabel {
+    color: #f3e6d4;
+}
+QDialogButtonBox QPushButton {
+    min-width: 72px;
+}

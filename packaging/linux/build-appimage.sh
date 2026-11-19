@@ -28,11 +28,12 @@ install -Dm644 "${ROOT}/packaging/linux/org.ocrcatalog.OCRCatalog.desktop" \
 install -Dm644 "${ROOT}/packaging/linux/org.ocrcatalog.OCRCatalog.metainfo.xml" \
   "${APPDIR}/usr/share/metainfo/org.ocrcatalog.OCRCatalog.metainfo.xml"
 
-if [[ -f "${ROOT}/packaging/linux/icons/org.ocrcatalog.OCRCatalog.png" ]]; then
-  install -Dm644 "${ROOT}/packaging/linux/icons/org.ocrcatalog.OCRCatalog.png" \
-    "${APPDIR}/usr/share/icons/hicolor/256x256/apps/org.ocrcatalog.OCRCatalog.png"
-  cp "${ROOT}/packaging/linux/icons/org.ocrcatalog.OCRCatalog.png" "${APPDIR}/org.ocrcatalog.OCRCatalog.png"
+PNG="${ROOT}/packaging/linux/icons/org.ocrcatalog.OCRCatalog.png"
+if [[ ! -f "${PNG}" ]]; then
+  python3 "${ROOT}/packaging/linux/generate-icon.py"
 fi
+install -Dm644 "${PNG}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/org.ocrcatalog.OCRCatalog.png"
+cp "${PNG}" "${APPDIR}/org.ocrcatalog.OCRCatalog.png"
 cp "${ROOT}/packaging/linux/org.ocrcatalog.OCRCatalog.desktop" "${APPDIR}/org.ocrcatalog.OCRCatalog.desktop"
 
 LINUXDEPLOY="${BUILD}/linuxdeploy-${ARCH}.AppImage"
@@ -47,6 +48,7 @@ fi
 
 export QMAKE="$(command -v qmake6 || command -v qmake)"
 export LINUXDEPLOY_OUTPUT_VERSION="${LINUXDEPLOY_OUTPUT_VERSION:-1.0.0}"
+export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-sqldrivers}"
 cd "${BUILD}"
 # Extract linuxdeploy if FUSE is unavailable (common in CI/containers).
 run_ld() {

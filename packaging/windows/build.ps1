@@ -28,6 +28,21 @@ Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Copy-Item $exe $stage
 windeployqt --release --compiler-runtime (Join-Path $stage "OCRCatalog.exe")
+$sqlPlugin = $null
+if ($QtDir) {
+    $sqlPlugin = Join-Path $QtDir "plugins/sqldrivers"
+}
+if (-not $sqlPlugin -or -not (Test-Path $sqlPlugin)) {
+    $qmake = Get-Command qmake -ErrorAction SilentlyContinue
+    if ($qmake) {
+        $qtPrefix = & $qmake.Source -query QT_INSTALL_PLUGINS
+        $sqlPlugin = Join-Path $qtPrefix "sqldrivers"
+    }
+}
+if ($sqlPlugin -and (Test-Path $sqlPlugin)) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $stage "sqldrivers") | Out-Null
+    Copy-Item (Join-Path $sqlPlugin "qsqlite*") (Join-Path $stage "sqldrivers") -ErrorAction SilentlyContinue
+}
 
 $zip = Join-Path $Root "$DistDir/OCRCatalog-windows.zip"
 if (Test-Path $zip) { Remove-Item $zip }

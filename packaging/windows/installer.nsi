@@ -25,5 +25,8 @@ SectionEnd
 Section "Uninstall"
   Delete "$SMPROGRAMS\OCR Catalog.lnk"
   Delete "$DESKTOP\OCR Catalog.lnk"
+  IfFileExists "$INSTDIR\OCRCatalog.exe" 0 skip_rm
+  IfFileExists "$INSTDIR\Uninstall.exe" 0 skip_rm
   RMDir /r "$INSTDIR"
+skip_rm:
 SectionEnd

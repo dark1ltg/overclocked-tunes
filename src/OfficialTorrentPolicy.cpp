@@ -17,6 +17,12 @@ QString hostOf(const QString &url)
     if (scheme < 0)
         return {};
     QString rest = trimmed.mid(scheme + 3);
+    if (rest.startsWith(QLatin1Char('['))) {
+        const int end = rest.indexOf(QLatin1Char(']'));
+        if (end < 0)
+            return {};
+        return rest.mid(1, end - 1);
+    }
     const int slash = rest.indexOf(QLatin1Char('/'));
     if (slash >= 0)
         rest = rest.left(slash);
