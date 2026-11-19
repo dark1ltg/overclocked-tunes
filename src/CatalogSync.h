@@ -1,0 +1,31 @@
+#pragma once
+
+#include "Types.h"
+
+#include <QObject>
+#include <QString>
+#include <QVector>
+#include <atomic>
+
+class CatalogSync : public QObject {
+    Q_OBJECT
+public:
+    explicit CatalogSync(QObject *parent = nullptr);
+
+    void setDelayMs(int ms) { m_delayMs = ms; }
+    void cancel() { m_cancel = true; }
+
+public slots:
+    void start();
+
+signals:
+    void progress(int current, int total, const QString &message);
+    void remixesParsed(const QVector<RemixRecord> &records);
+    void albumsParsed(const QVector<AlbumRecord> &records);
+    void finished(bool ok, const QString &message);
+
+private:
+    bool fetchPages(const QString &listUrl, bool albums);
+    int m_delayMs = 400;
+    std::atomic<bool> m_cancel{false};
+};
