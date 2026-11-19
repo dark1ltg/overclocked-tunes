@@ -111,6 +111,9 @@ MainWindow::MainWindow(QWidget *parent)
         m_statusLabel->setText(message);
     });
     connect(m_downloads, &DownloadQueue::finished, this, &MainWindow::onDownloadFinished);
+    connect(m_downloads, &DownloadQueue::remixRangeCovered, this, &MainWindow::onRemixRangeCovered);
+    connect(m_downloads, &DownloadQueue::torrentsReady, this, &MainWindow::onTorrentsReady);
+    connect(m_downloads, &DownloadQueue::coverageSummary, this, &MainWindow::onCoverageSummary);
     m_worker.start();
 
     QTimer::singleShot(600, this, &MainWindow::maybeOfferMenuInstall);
@@ -161,8 +164,9 @@ void MainWindow::buildUi()
         QMessageBox::about(this, tr("About OCR Catalog"),
                            tr("<b>OCR Catalog</b> %1<p>Catalog and download freely published "
                               "OC ReMix songs and albums from ocremix.org.</p>"
-                              "<p>Please keep downloads polite. For a first-time full back-catalog, "
-                              "OC ReMix recommends their official torrents.</p>")
+                              "<p>Download missing starts with official collection torrents "
+                              "(currently OCR 1–4473), then fetches only newer remixes and "
+                              "albums the torrents do not cover from the site's HTTPS mirrors.</p>")
                                .arg(QLatin1String(AppInfo::version())));
     });
 
@@ -219,8 +223,8 @@ void MainWindow::buildUi()
 
     auto *emptyHint = new QLabel(
         tr("No catalog yet. Choose a library folder, then click Sync catalog.\n"
-           "OCR Catalog lists public OC ReMix songs and official albums, then downloads "
-           "them from the same mirrors the website uses."));
+           "Download missing uses official OC ReMix torrents for the back-catalog first, "
+           "then HTTPS mirrors only for remixes and albums those torrents do not include."));
     emptyHint->setObjectName(QStringLiteral("emptyHint"));
     emptyHint->setWordWrap(true);
     emptyHint->setAlignment(Qt::AlignCenter);
@@ -284,14 +288,19 @@ void MainWindow::fillAlbumTable()
 
 void MainWindow::updateStatus()
 {
-    m_statusLabel->setText(tr("%1 ReMixes (%2 downloaded) · %3 albums (%4 downloaded) · library: %5")
-                               .arg(m_store.remixCount())
-                               .arg(m_store.remixDownloadedCount())
-                               .arg(m_store.albumCount())
-                               .arg(m_store.albumDownloadedCount())
-                               .arg(Settings::instance().libraryPath().isEmpty()
-                                        ? tr("(not set)")
-                                        : Settings::instance().libraryPath()));
+    m_statusLabel->setText(
+        tr("%1 ReMixes (%2 downloaded, %3 via torrent, %4 remaining) · %5 albums "
+           "(%6 downloaded, %7 via torrent) · library: %8")
+            .arg(m_store.remixCount())
+            .arg(m_store.remixDownloadedCount())
+            .arg(m_store.remixTorrentCoveredCount())
+            .arg(m_store.remixesNeedingDownload().size())
+            .arg(m_store.albumCount())
+            .arg(m_store.albumDownloadedCount())
+            .arg(m_store.albumTorrentCoveredCount())
+            .arg(Settings::instance().libraryPath().isEmpty()
+                     ? tr("(not set)")
+                     : Settings::instance().libraryPath()));
 }
 
 void MainWindow::ensureLibrary()
@@ -333,16 +342,21 @@ void MainWindow::downloadMissing()
     auto remixes = m_store.remixesNeedingDownload();
     auto albums = Settings::instance().includeAlbums() ? m_store.albumsNeedingDownload() : QVector<AlbumRecord>{};
     if (remixes.isEmpty() && albums.isEmpty()) {
-        QMessageBox::information(this, tr("Downloads"), tr("Everything in the catalog is already downloaded or unavailable."));
+        QMessageBox::information(this, tr("Downloads"),
+                                 tr("Everything in the catalog is already downloaded, covered by an official torrent, or unavailable."));
         return;
     }
     m_queueTable->setRowCount(0);
     const QString library = Settings::instance().libraryPath();
     const int delay = Settings::instance().requestDelayMs();
+    const bool preferTorrents = Settings::instance().preferTorrents();
+    const bool includeAlbums = Settings::instance().includeAlbums();
     m_tabs->setCurrentIndex(2);
-    QMetaObject::invokeMethod(m_downloads, [this, remixes, albums, library, delay]() {
+    QMetaObject::invokeMethod(m_downloads, [this, remixes, albums, library, delay, preferTorrents, includeAlbums]() {
         m_downloads->setLibraryPath(library);
         m_downloads->setDelayMs(delay);
+        m_downloads->setPreferTorrents(preferTorrents);
+        m_downloads->setIncludeAlbums(includeAlbums);
         m_downloads->enqueueRemixes(remixes);
         m_downloads->enqueueAlbums(albums);
         m_downloads->start();
@@ -373,6 +387,8 @@ void MainWindow::downloadSelected()
     QMetaObject::invokeMethod(m_downloads, [this, remixes, albums, library, delay]() {
         m_downloads->setLibraryPath(library);
         m_downloads->setDelayMs(delay);
+        m_downloads->setPreferTorrents(false);
+        m_downloads->setIncludeAlbums(true);
         m_downloads->enqueueRemixes(remixes);
         m_downloads->enqueueAlbums(albums);
         m_downloads->start();
@@ -414,9 +430,16 @@ void MainWindow::openSettings()
     delay->setValue(Settings::instance().requestDelayMs());
     auto *albums = new QCheckBox(tr("Include official OC ReMix albums when downloading missing items"));
     albums->setChecked(Settings::instance().includeAlbums());
+    auto *torrents = new QCheckBox(tr("Use official torrents first for the back-catalog (recommended)"));
+    torrents->setChecked(Settings::instance().preferTorrents());
+    auto *openTorrents = new QCheckBox(tr("Open collection torrents in the system BitTorrent client"));
+    openTorrents->setChecked(Settings::instance().openTorrents());
     form->addRow(tr("Library"), libRow);
     form->addRow(tr("Polite delay"), delay);
-    form->addRow(tr("Note"), new QLabel(tr("Concurrent HTTP connections stay at 1 to be kind to OC ReMix mirrors.")));
+    form->addRow(tr("Note"), new QLabel(tr("Mirror fetches stay at 1 connection. Torrents cover OCR 1 through the "
+                                           "latest collection pack; only newer tracks hit the HTTPS mirrors.")));
+    form->addRow(torrents);
+    form->addRow(openTorrents);
     form->addRow(albums);
     Q_UNUSED(conc);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -428,6 +451,8 @@ void MainWindow::openSettings()
     Settings::instance().setLibraryPath(lib->text());
     Settings::instance().setRequestDelayMs(delay->value());
     Settings::instance().setIncludeAlbums(albums->isChecked());
+    Settings::instance().setPreferTorrents(torrents->isChecked());
+    Settings::instance().setOpenTorrents(openTorrents->isChecked());
     updateStatus();
 }
 
@@ -549,6 +574,39 @@ void MainWindow::onDownloadFinished(bool ok, const QString &message)
     reloadTables();
     updateStatus();
     m_statusLabel->setText(message);
+}
+
+void MainWindow::onRemixRangeCovered(int from, int to, const QString &note)
+{
+    m_store.markRemixesInTorrentRange(from, to, note);
+    m_store.setMeta(QStringLiteral("torrentLastOcr"), QString::number(to));
+    reloadTables();
+    updateStatus();
+}
+
+void MainWindow::onTorrentsReady(const QStringList &paths)
+{
+    if (!Settings::instance().openTorrents() || paths.isEmpty())
+        return;
+    for (const auto &path : paths)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void MainWindow::onCoverageSummary(int lastOcr, int collectionTracks, int remainingRemixes, int remainingAlbums)
+{
+    m_store.setMeta(QStringLiteral("torrentLastOcr"), QString::number(lastOcr));
+    m_store.setMeta(QStringLiteral("torrentTrackCount"), QString::number(collectionTracks));
+    if (lastOcr <= 0) {
+        m_statusLabel->setText(tr("Official collection torrents were not saved. "
+                                  "Fetching remaining items from HTTPS mirrors."));
+        return;
+    }
+    m_statusLabel->setText(tr("Official torrents cover through OCR%1 (%2 tracks). "
+                              "Fetching %3 newer ReMixes and %4 albums not in those torrents.")
+                               .arg(lastOcr, 5, 10, QLatin1Char('0'))
+                               .arg(collectionTracks)
+                               .arg(remainingRemixes)
+                               .arg(remainingAlbums));
 }
 
 void MainWindow::maybeOfferMenuInstall()
