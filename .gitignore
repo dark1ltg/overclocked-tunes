@@ -1,0 +1,13 @@
+build/
+cmake-build-*/
+*.user
+*.user.*
+.DS_Store
+CMakeLists.txt.user
+.idea/
+.vscode/
+*.AppImage
+*.dmg
+*.exe
+install_manifest.txt
+.cache/
