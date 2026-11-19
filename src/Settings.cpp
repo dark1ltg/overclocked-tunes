@@ -1,5 +1,7 @@
 #include "Settings.h"
 
+#include "OfficialTorrentEngine.h"
+
 #include <QSettings>
 #include <algorithm>
 
@@ -51,12 +53,23 @@ void Settings::setPreferTorrents(bool value)
 
 bool Settings::openTorrents() const
 {
-    return QSettings().value(QStringLiteral("openTorrents"), true).toBool();
+    const bool defaultOpen = !OfficialTorrentEngine::available();
+    return QSettings().value(QStringLiteral("openTorrents"), defaultOpen).toBool();
 }
 
 void Settings::setOpenTorrents(bool value)
 {
     QSettings().setValue(QStringLiteral("openTorrents"), value);
+}
+
+bool Settings::downloadOfficialTorrentsInApp() const
+{
+    return QSettings().value(QStringLiteral("downloadOfficialTorrentsInApp"), true).toBool();
+}
+
+void Settings::setDownloadOfficialTorrentsInApp(bool value)
+{
+    QSettings().setValue(QStringLiteral("downloadOfficialTorrentsInApp"), value);
 }
 
 int Settings::requestDelayMs() const
