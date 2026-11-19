@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="48" fill="#1a120c"/>
+  <circle cx="128" cy="128" r="92" fill="#c45c12"/>
+  <circle cx="128" cy="128" r="74" fill="#1a120c"/>
+  <path d="M64 128h18l12-36 16 72 14-48 12 28h56" fill="none" stroke="#ffb066" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="128" y="214" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="700" fill="#ffb066">OCR</text>
+</svg>
