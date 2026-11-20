@@ -153,8 +153,9 @@ void OfficialTorrentEngine::cancelActive()
             DownloadJob job;
             job.kind = DownloadJob::CollectionTorrent;
             const auto st = handle.status();
-            job.itemId = QStringLiteral("torrent:") + QString::fromStdString(st.name);
-            job.displayName = QString::fromStdString(st.name);
+            const QString name = QString::fromStdString(st.name);
+            job.itemId = jobIdForName(name);
+            job.displayName = name;
             job.status = QStringLiteral("cancelled");
             job.bytesDone = st.total_wanted_done;
             job.bytesTotal = st.total_wanted;
@@ -166,13 +167,46 @@ void OfficialTorrentEngine::cancelActive()
 #endif
 }
 
+bool OfficialTorrentEngine::hasActiveTorrents() const
+{
+#ifdef OCRCATALOG_HAS_TORRENT
+    if (!m_session)
+        return false;
+    try {
+        for (const auto &handle : m_session->get_torrents()) {
+            if (!handle.is_valid())
+                continue;
+            const auto st = handle.status();
+            if (st.is_finished)
+                continue;
+            if (st.flags & lt::torrent_flags::paused)
+                continue;
+            if (st.errc)
+                continue;
+            return true;
+        }
+    } catch (const std::exception &) {
+        return false;
+    }
+#endif
+    return false;
+}
+
+#ifdef OCRCATALOG_HAS_TORRENT
+QString OfficialTorrentEngine::jobIdForName(const QString &name) const
+{
+    return m_jobIds.value(name, QStringLiteral("torrent:") + name);
+}
+#endif
+
 bool OfficialTorrentEngine::addOfficialTorrent(const QString &sourceUrl, const QString &torrentFile,
-                                               const QString &savePath)
+                                               const QString &savePath, const QString &itemId)
 {
 #ifndef OCRCATALOG_HAS_TORRENT
     Q_UNUSED(sourceUrl);
     Q_UNUSED(torrentFile);
     Q_UNUSED(savePath);
+    Q_UNUSED(itemId);
     return false;
 #else
     if (m_stopped)
@@ -247,9 +281,12 @@ bool OfficialTorrentEngine::addOfficialTorrent(const QString &sourceUrl, const Q
         return false;
     }
 
+    const QString jobId = itemId.isEmpty() ? QStringLiteral("torrent:") + name : itemId;
+    m_jobIds.insert(name, jobId);
+
     DownloadJob job;
     job.kind = DownloadJob::CollectionTorrent;
-    job.itemId = QStringLiteral("torrent:") + name;
+    job.itemId = jobId;
     job.displayName = name;
     job.status = QStringLiteral("running");
     emit jobUpdated(job);
@@ -271,8 +308,9 @@ void OfficialTorrentEngine::poll()
                 for (const auto &st : update->status) {
                     DownloadJob job;
                     job.kind = DownloadJob::CollectionTorrent;
-                    job.itemId = QStringLiteral("torrent:") + QString::fromStdString(st.name);
-                    job.displayName = QString::fromStdString(st.name);
+                    const QString name = QString::fromStdString(st.name);
+                    job.itemId = jobIdForName(name);
+                    job.displayName = name;
                     job.bytesDone = st.total_wanted_done;
                     job.bytesTotal = st.total_wanted;
                     if (st.is_finished)
@@ -296,8 +334,9 @@ void OfficialTorrentEngine::poll()
                 }
                 DownloadJob job;
                 job.kind = DownloadJob::CollectionTorrent;
-                job.itemId = QStringLiteral("torrent:") + QString::fromStdString(st.name);
-                job.displayName = QString::fromStdString(st.name);
+                const QString name = QString::fromStdString(st.name);
+                job.itemId = jobIdForName(name);
+                job.displayName = name;
                 job.status = QStringLiteral("done");
                 job.bytesDone = st.total_wanted_done;
                 job.bytesTotal = st.total_wanted;
