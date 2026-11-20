@@ -27,6 +27,7 @@ set(OCR_SOURCES
     src/OfficialTorrentPolicy.cpp
     src/OfficialTorrentEngine.cpp
     src/MainWindow.cpp
+    src/DocsScreenshots.cpp
     src/resources.qrc
 )
 

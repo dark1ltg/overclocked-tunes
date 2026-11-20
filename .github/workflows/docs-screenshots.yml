@@ -8,6 +8,7 @@ on:
       - src/MainWindow.cpp
       - src/MainWindow.h
       - src/main.cpp
+      - src/DocsScreenshots.cpp
       - .github/workflows/docs-screenshots.yml
 
 permissions:
