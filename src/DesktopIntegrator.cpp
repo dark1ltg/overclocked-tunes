@@ -36,7 +36,11 @@ QString DesktopIntegrator::desktopFilePath()
 
 bool DesktopIntegrator::isInstalled()
 {
-    return QFileInfo::exists(desktopFilePath()) && QFileInfo::exists(installedAppImagePath());
+    if (!QFileInfo::exists(desktopFilePath()))
+        return false;
+    if (isRunningAsAppImage())
+        return QFileInfo::exists(installedAppImagePath());
+    return true;
 }
 
 static bool writeIconPng(const QString &path, int size)
@@ -62,16 +66,19 @@ bool DesktopIntegrator::install(QString *error)
         return false;
     }
 
-    const QString dest = installedAppImagePath();
-    QDir().mkpath(QFileInfo(dest).absolutePath());
-    QFile::remove(dest);
-    if (!QFile::copy(source, dest)) {
-        if (error)
-            *error = QStringLiteral("Could not copy the app to %1").arg(dest);
-        return false;
+    QString dest = source;
+    if (isRunningAsAppImage()) {
+        dest = installedAppImagePath();
+        QDir().mkpath(QFileInfo(dest).absolutePath());
+        QFile::remove(dest);
+        if (!QFile::copy(source, dest)) {
+            if (error)
+                *error = QStringLiteral("Could not copy the app to %1").arg(dest);
+            return false;
+        }
+        QFile(dest).setPermissions(QFile(dest).permissions() | QFileDevice::ExeOwner | QFileDevice::ExeGroup
+                                   | QFileDevice::ExeOther);
     }
-    QFile(dest).setPermissions(QFile(dest).permissions() | QFileDevice::ExeOwner | QFileDevice::ExeGroup
-                               | QFileDevice::ExeOther);
 
     const QString iconDir = QDir::homePath() + QStringLiteral("/.local/share/icons/hicolor");
     const int sizes[] = {16, 24, 32, 48, 64, 128, 256};

@@ -48,7 +48,7 @@ fi
 
 export QMAKE="$(command -v qmake6 || command -v qmake)"
 export LINUXDEPLOY_OUTPUT_VERSION="${LINUXDEPLOY_OUTPUT_VERSION:-1.0.0}"
-export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-sqldrivers}"
+export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-sqldrivers;tls;iconengines;imageformats}"
 cd "${BUILD}"
 # Extract linuxdeploy if FUSE is unavailable (common in CI/containers).
 run_ld() {
