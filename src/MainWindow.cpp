@@ -86,6 +86,8 @@ void MainWindow::setupWorkers()
     m_torrentEngine = new OfficialTorrentEngine;
     m_torrentEngine->moveToThread(&m_worker);
     m_downloads->setTorrentEngine(m_torrentEngine);
+    m_sync->setJobGate(&m_jobGate);
+    m_downloads->setJobGate(&m_jobGate);
     connect(m_sync, &CatalogSync::remixesParsed, this, &MainWindow::onRemixesParsed);
     connect(m_sync, &CatalogSync::albumsParsed, this, &MainWindow::onAlbumsParsed);
     connect(m_sync, &CatalogSync::progress, this, [this](int current, int total, const QString &message) {
@@ -142,10 +144,8 @@ void MainWindow::shutdownWorkers()
     }
     if (m_worker.isRunning()) {
         m_worker.quit();
-        if (!m_worker.wait(20000)) {
-            m_worker.terminate();
-            m_worker.wait(3000);
-        }
+        if (!m_worker.wait(60000))
+            qWarning() << "OCR Catalog worker did not exit; leaving it to the process so libtorrent is not terminated.";
     }
     auto reclaim = [this](QObject *obj) {
         if (!obj)
@@ -153,12 +153,18 @@ void MainWindow::shutdownWorkers()
         obj->moveToThread(QThread::currentThread());
         delete obj;
     };
-    reclaim(m_sync);
-    m_sync = nullptr;
-    reclaim(m_downloads);
-    m_downloads = nullptr;
-    reclaim(m_torrentEngine);
-    m_torrentEngine = nullptr;
+    if (!m_worker.isRunning()) {
+        reclaim(m_sync);
+        m_sync = nullptr;
+        reclaim(m_downloads);
+        m_downloads = nullptr;
+        reclaim(m_torrentEngine);
+        m_torrentEngine = nullptr;
+    } else {
+        m_sync = nullptr;
+        m_downloads = nullptr;
+        m_torrentEngine = nullptr;
+    }
     m_workersStarted = false;
 }
 
@@ -476,8 +482,9 @@ void MainWindow::chooseLibrary()
 
 void MainWindow::syncCatalog()
 {
-    if (m_sync && m_sync->isRunning()) {
-        QMessageBox::information(this, tr("Sync"), tr("A catalog sync is already running."));
+    if ((m_sync && m_sync->isRunning()) || (m_downloads && m_downloads->isRunning()) || m_jobGate.locked()) {
+        QMessageBox::information(this, tr("Sync"),
+                                 tr("Wait for the current sync or download to finish (or cancel it) first."));
         return;
     }
     m_progress->setRange(0, 0);
@@ -491,9 +498,9 @@ void MainWindow::syncCatalog()
 
 void MainWindow::downloadMissing()
 {
-    if (m_downloads && m_downloads->isRunning()) {
+    if ((m_downloads && m_downloads->isRunning()) || (m_sync && m_sync->isRunning()) || m_jobGate.locked()) {
         QMessageBox::information(this, tr("Downloads"),
-                                 tr("A download is already running. Cancel it first."));
+                                 tr("Wait for the current sync or download to finish (or cancel it) first."));
         return;
     }
     ensureLibrary();
@@ -513,337 +520,18 @@ void MainWindow::downloadMissing()
     const bool includeAlbums = Settings::instance().includeAlbums();
     const bool downloadInApp = Settings::instance().downloadOfficialTorrentsInApp();
     const int concurrency = Settings::instance().concurrency();
+    const bool openTorrents = Settings::instance().openTorrents();
     m_tabs->setCurrentIndex(2);
-    QMetaObject::invokeMethod(m_downloads, [this, remixes, albums, library, delay, preferTorrents, includeAlbums, downloadInApp, concurrency]() {
+    QMetaObject::invokeMethod(m_downloads, [this, remixes, albums, library, delay, preferTorrents, includeAlbums, downloadInApp, openTorrents, concurrency]() {
         m_downloads->setLibraryPath(library);
         m_downloads->setDelayMs(delay);
         m_downloads->setConcurrency(concurrency);
         m_downloads->setPreferTorrents(preferTorrents);
         m_downloads->setIncludeAlbums(includeAlbums);
         m_downloads->setDownloadInApp(downloadInApp);
+        m_downloads->setOpenTorrents(openTorrents);
         m_downloads->enqueueRemixes(remixes);
         m_downloads->enqueueAlbums(albums);
         m_downloads->start();
     }, Qt::QueuedConnection);
-}
-
-void MainWindow::downloadSelected()
-{
-    if (m_downloads && m_downloads->isRunning()) {
-        QMessageBox::information(this, tr("Downloads"),
-                                 tr("A download is already running. Cancel it first."));
-        return;
-    }
-    ensureLibrary();
-    if (Settings::instance().libraryPath().isEmpty())
-        return;
-    QVector<RemixRecord> remixes;
-    QVector<AlbumRecord> albums;
-    if (m_tabs->currentIndex() == 0) {
-        for (int row : selectedRemixRows())
-            remixes.push_back(remixAtRow(row));
-    } else if (m_tabs->currentIndex() == 1) {
-        for (int row : selectedAlbumRows())
-            albums.push_back(albumAtRow(row));
-    }
-    if (remixes.isEmpty() && albums.isEmpty()) {
-        QMessageBox::information(this, tr("Downloads"), tr("Select one or more ReMixes or albums first."));
-        return;
-    }
-    const QString library = Settings::instance().libraryPath();
-    const int delay = Settings::instance().requestDelayMs();
-    const int concurrency = Settings::instance().concurrency();
-    m_tabs->setCurrentIndex(2);
-    QMetaObject::invokeMethod(m_downloads, [this, remixes, albums, library, delay, concurrency]() {
-        m_downloads->setLibraryPath(library);
-        m_downloads->setDelayMs(delay);
-        m_downloads->setConcurrency(concurrency);
-        m_downloads->setPreferTorrents(false);
-        m_downloads->setDownloadInApp(false);
-        m_downloads->setIncludeAlbums(true);
-        m_downloads->enqueueRemixes(remixes);
-        m_downloads->enqueueAlbums(albums);
-        m_downloads->start();
-    }, Qt::QueuedConnection);
-}
-
-void MainWindow::pauseDownloads()
-{
-    if (m_sync)
-        m_sync->cancel();
-    if (m_downloads)
-        m_downloads->cancel();
-    if (m_torrentEngine)
-        QMetaObject::invokeMethod(m_torrentEngine, "cancelActive", Qt::QueuedConnection);
-    m_statusLabel->setText(tr("Cancelling…"));
-}
-
-void MainWindow::openSettings()
-{
-    QDialog dlg(this);
-    dlg.setWindowTitle(tr("Settings"));
-    auto *form = new QFormLayout(&dlg);
-    auto *lib = new QLineEdit(Settings::instance().libraryPath());
-    auto *browse = new QPushButton(tr("Browse…"));
-    auto *libRow = new QWidget;
-    auto *libLayout = new QHBoxLayout(libRow);
-    libLayout->setContentsMargins(0, 0, 0, 0);
-    libLayout->addWidget(lib, 1);
-    libLayout->addWidget(browse);
-    connect(browse, &QPushButton::clicked, &dlg, [this, lib]() {
-        const QString dir = QFileDialog::getExistingDirectory(this, tr("Library folder"), lib->text());
-        if (!dir.isEmpty())
-            lib->setText(dir);
-    });
-    auto *conc = new QSpinBox;
-    conc->setRange(1, 3);
-    conc->setValue(Settings::instance().concurrency());
-    auto *delay = new QSpinBox;
-    delay->setRange(250, 2000);
-    delay->setSuffix(tr(" ms"));
-    delay->setValue(Settings::instance().requestDelayMs());
-    auto *albums = new QCheckBox(tr("Include official OC ReMix albums when downloading missing items"));
-    albums->setChecked(Settings::instance().includeAlbums());
-    auto *torrents = new QCheckBox(tr("Use official torrents first for the back-catalog (recommended)"));
-    torrents->setChecked(Settings::instance().preferTorrents());
-    auto *inAppTorrents = new QCheckBox(tr("Download official OC ReMix torrents inside this app"));
-    inAppTorrents->setChecked(Settings::instance().downloadOfficialTorrentsInApp());
-    if (!OfficialTorrentEngine::available()) {
-        inAppTorrents->setChecked(false);
-        inAppTorrents->setEnabled(false);
-        inAppTorrents->setToolTip(tr("This build was compiled without libtorrent. Save the official "
-                                     ".torrent files and open them in a BitTorrent client."));
-    }
-    auto *openTorrents = new QCheckBox(tr("Also open collection torrents in the system BitTorrent client"));
-    openTorrents->setChecked(Settings::instance().openTorrents());
-    form->addRow(tr("Library"), libRow);
-    form->addRow(tr("HTTPS connections"), conc);
-    form->addRow(tr("Polite delay"), delay);
-    form->addRow(tr("Note"), new QLabel(tr("Catalog downloads start with the two official packs "
-                                           "(OCR 1–4000 and 4001–4473). HTTPS mirrors are used for newer tracks "
-                                           "and for anything the in-app torrent engine cannot take. "
-                                           "Only bt.ocremix.org torrents are accepted.")));
-    form->addRow(torrents);
-    form->addRow(inAppTorrents);
-    form->addRow(openTorrents);
-    form->addRow(albums);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() != QDialog::Accepted)
-        return;
-    Settings::instance().setLibraryPath(lib->text());
-    Settings::instance().setConcurrency(conc->value());
-    Settings::instance().setRequestDelayMs(delay->value());
-    Settings::instance().setIncludeAlbums(albums->isChecked());
-    Settings::instance().setPreferTorrents(torrents->isChecked());
-    Settings::instance().setDownloadOfficialTorrentsInApp(inAppTorrents->isChecked());
-    Settings::instance().setOpenTorrents(openTorrents->isChecked());
-    updateStatus();
-}
-
-void MainWindow::installMenu()
-{
-    QString error;
-    if (!DesktopIntegrator::install(&error)) {
-        QMessageBox::warning(this, tr("Application menu"), error);
-        return;
-    }
-    Settings::instance().setMenuInstalled(true);
-    QMessageBox::information(this, tr("Application menu"),
-                             tr("OCR Catalog was added to your application menu "
-                                "(KDE Plasma, GNOME, and other Freedesktop desktops).\n\n"
-                                "If it does not appear immediately, log out or run:\n"
-                                "update-desktop-database ~/.local/share/applications"));
-}
-
-void MainWindow::removeMenu()
-{
-    QString error;
-    DesktopIntegrator::uninstall(&error);
-    Settings::instance().setMenuInstalled(false);
-    QMessageBox::information(this, tr("Application menu"), tr("Removed OCR Catalog from the application menu."));
-}
-
-void MainWindow::playSelected()
-{
-    if (m_tabs->currentIndex() != 0)
-        return;
-    const auto rows = selectedRemixRows();
-    if (rows.isEmpty())
-        return;
-    RemixRecord record = remixAtRow(rows.first());
-    if (record.localPath.isEmpty() || !QFileInfo::exists(record.localPath)) {
-        m_store.markExistingFiles(Settings::instance().libraryPath());
-        record = m_store.remix(record.ocrId);
-        applyRemixToTable(record);
-    }
-    if (record.localPath.isEmpty() || !QFileInfo::exists(record.localPath)) {
-        QMessageBox::information(this, tr("Play"), tr("Download this ReMix first."));
-        return;
-    }
-#ifdef OCRCATALOG_HAS_MULTIMEDIA
-    m_player->setSource(QUrl::fromLocalFile(record.localPath));
-    m_player->play();
-    m_statusLabel->setText(tr("Playing %1").arg(record.title));
-#else
-    QDesktopServices::openUrl(QUrl::fromLocalFile(record.localPath));
-#endif
-}
-
-void MainWindow::onSearchChanged(const QString &)
-{
-    reloadTables();
-}
-
-void MainWindow::onRemixSelectionChanged()
-{
-    const auto rows = selectedRemixRows();
-    if (rows.isEmpty())
-        return;
-    const auto r = remixAtRow(rows.first());
-    m_detail->setHtml(QStringLiteral(
-                          "<h2>%1</h2><p><b>%2</b></p><p>%3</p><p>Posted %4 · %5</p>"
-                          "<p><a href=\"%6\">Open on OC ReMix</a></p><p>%7</p><pre>%8</pre>")
-                          .arg(r.title.toHtmlEscaped(), r.ocrId, r.game.toHtmlEscaped(), r.posted,
-                               r.duration, r.pageUrl, r.artists.toHtmlEscaped(),
-                               r.mirrors.join(QLatin1Char('\n')).toHtmlEscaped()));
-}
-
-void MainWindow::onAlbumSelectionChanged()
-{
-    const auto rows = selectedAlbumRows();
-    if (rows.isEmpty())
-        return;
-    const auto a = albumAtRow(rows.first());
-    m_detail->setHtml(QStringLiteral(
-                          "<h2>%1</h2><p>%2 · %3</p><p>%4</p><p>%5</p>"
-                          "<p><a href=\"%6\">Album page</a></p>%7%8")
-                          .arg(a.title.toHtmlEscaped(), a.catalog, a.released, a.classification,
-                               a.ocrPublished ? tr("Official OC ReMix album") : tr("Listed only (not downloaded)"),
-                               a.pageUrl,
-                               a.httpHomepage.isEmpty()
-                                   ? QString()
-                                   : QStringLiteral("<p><a href=\"%1\">HTTP / album site</a></p>").arg(a.httpHomepage),
-                               a.torrentUrl.isEmpty()
-                                   ? QString()
-                                   : QStringLiteral("<p><a href=\"%1\">BitTorrent</a></p>").arg(a.torrentUrl)));
-}
-
-void MainWindow::onRemixesParsed(const QVector<RemixRecord> &records)
-{
-    m_store.upsertRemixes(records);
-    m_tabs->setTabText(0, tr("ReMixes (%1)").arg(m_store.remixCount()));
-    if (auto *hint = findChild<QLabel *>(QStringLiteral("emptyHint")))
-        hint->setVisible(false);
-}
-
-void MainWindow::onAlbumsParsed(const QVector<AlbumRecord> &records)
-{
-    m_store.upsertAlbums(records);
-    m_tabs->setTabText(1, tr("Albums (%1)").arg(m_store.albumCount()));
-}
-
-void MainWindow::onSyncFinished(bool ok, const QString &message)
-{
-    m_progress->setRange(0, 1);
-    m_progress->setValue(1);
-    if (!ok)
-        QMessageBox::warning(this, tr("Sync"), message);
-    m_store.markExistingFiles(Settings::instance().libraryPath());
-    reloadTables();
-    updateStatus();
-    m_statusLabel->setText(message);
-}
-
-void MainWindow::onDownloadFinished(bool ok, const QString &message)
-{
-    Q_UNUSED(ok);
-    m_progress->setRange(0, 1);
-    m_progress->setValue(1);
-    m_store.markExistingFiles(Settings::instance().libraryPath());
-    reloadTables();
-    updateStatus();
-    m_statusLabel->setText(message);
-}
-
-void MainWindow::onRemixRangeCovered(int from, int to, const QString &note)
-{
-    m_store.markRemixesInTorrentRange(from, to, note);
-    m_store.setMeta(QStringLiteral("torrentLastOcr"), QString::number(to));
-    updateStatus();
-}
-
-void MainWindow::onTorrentCompleted(const QString &name, const QString &savePath)
-{
-    Q_UNUSED(name);
-    Q_UNUSED(savePath);
-    m_store.markExistingFiles(Settings::instance().libraryPath());
-    reloadTables();
-    updateStatus();
-    m_statusLabel->setText(tr("Official collection torrent finished. Matching files are now playable."));
-}
-
-void MainWindow::onTorrentsReady(const QStringList &paths)
-{
-    if (paths.isEmpty())
-        return;
-    if (Settings::instance().downloadOfficialTorrentsInApp() && OfficialTorrentEngine::available())
-        return;
-    if (!Settings::instance().openTorrents())
-        return;
-    for (const auto &path : paths)
-        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-}
-
-void MainWindow::onCoverageSummary(int lastOcr, int collectionTracks, int remainingRemixes, int remainingAlbums)
-{
-    m_store.setMeta(QStringLiteral("torrentLastOcr"), QString::number(lastOcr));
-    m_store.setMeta(QStringLiteral("torrentTrackCount"), QString::number(collectionTracks));
-    if (lastOcr <= 0) {
-        m_statusLabel->setText(tr("Official collection torrents were not saved. "
-                                  "Fetching remaining items from HTTPS mirrors."));
-        return;
-    }
-    m_statusLabel->setText(tr("Official torrents cover through OCR%1 (%2 tracks). "
-                              "Fetching %3 newer ReMixes and %4 albums not in those torrents.")
-                               .arg(lastOcr, 5, 10, QLatin1Char('0'))
-                               .arg(collectionTracks)
-                               .arg(remainingRemixes)
-                               .arg(remainingAlbums));
-}
-
-void MainWindow::maybeOfferMenuInstall()
-{
-    if (!DesktopIntegrator::isRunningAsAppImage())
-        return;
-    if (Settings::instance().menuInstallPrompted() || DesktopIntegrator::isInstalled())
-        return;
-    Settings::instance().setMenuInstallPrompted(true);
-    const auto answer = QMessageBox::question(
-        this, tr("Application menu"),
-        tr("Add OCR Catalog to your application menu so it appears in KDE Plasma, GNOME, and other desktops?"));
-    if (answer == QMessageBox::Yes)
-        installMenu();
-}
-
-QVector<int> MainWindow::selectedRemixRows() const
-{
-    QVector<int> rows;
-    for (auto *item : m_remixTable->selectedItems()) {
-        if (item->column() == 0 && !rows.contains(item->row()))
-            rows.push_back(item->row());
-    }
-    return rows;
-}
-
-QVector<int> MainWindow::selectedAlbumRows() const
-{
-    QVector<int> rows;
-    for (auto *item : m_albumTable->selectedItems()) {
-        if (item->column() == 0 && !rows.contains(item->row()))
-            rows.push_back(item->row());
-    }
-    return rows;
 }
