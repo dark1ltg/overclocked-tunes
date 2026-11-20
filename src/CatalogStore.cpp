@@ -1,5 +1,7 @@
 #include "CatalogStore.h"
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
@@ -153,12 +155,26 @@ QSqlDatabase CatalogStore::db() const
     return QSqlDatabase::database(m_connectionName);
 }
 
+bool CatalogStore::beginWrite()
+{
+    if (db().transaction())
+        return true;
+    db().rollback();
+    if (db().transaction())
+        return true;
+    if (m_lastError.isEmpty())
+        m_lastError = db().lastError().text();
+    if (m_lastError.isEmpty())
+        m_lastError = tr("Could not start a catalog write.");
+    return false;
+}
+
 void CatalogStore::upsertRemixes(const QVector<RemixRecord> &records)
 {
     if (records.isEmpty())
         return;
     QSqlQuery q(db());
-    if (!db().transaction())
+    if (!beginWrite())
         return;
     q.prepare(QStringLiteral(R"(
         INSERT INTO remixes (ocr_id, ocr_number, title, game, artists, posted, page_url,
@@ -385,7 +401,7 @@ void CatalogStore::upsertAlbums(const QVector<AlbumRecord> &records)
     if (records.isEmpty())
         return;
     QSqlQuery q(db());
-    if (!db().transaction())
+    if (!beginWrite())
         return;
     q.prepare(QStringLiteral(R"(
         INSERT INTO albums (album_id, slug, title, catalog, classification, released, page_url,
@@ -432,246 +448,4 @@ void CatalogStore::upsertAlbums(const QVector<AlbumRecord> &records)
         db().commit();
     else
         db().rollback();
-}
-
-bool CatalogStore::updateAlbum(const AlbumRecord &record)
-{
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral(R"(
-        INSERT INTO albums (album_id, slug, title, catalog, classification, released, page_url,
-                            torrent_url, http_homepage, zip_mirrors, ocr_published, status, local_path, last_error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(album_id) DO UPDATE SET
-            slug=CASE WHEN excluded.slug = '' THEN albums.slug ELSE excluded.slug END,
-            title=CASE WHEN excluded.title = '' THEN albums.title ELSE excluded.title END,
-            catalog=CASE WHEN excluded.catalog = '' THEN albums.catalog ELSE excluded.catalog END,
-            classification=CASE WHEN excluded.classification = '' THEN albums.classification ELSE excluded.classification END,
-            released=CASE WHEN excluded.released = '' THEN albums.released ELSE excluded.released END,
-            page_url=CASE WHEN excluded.page_url = '' THEN albums.page_url ELSE excluded.page_url END,
-            torrent_url=CASE WHEN excluded.torrent_url = '' THEN albums.torrent_url ELSE excluded.torrent_url END,
-            http_homepage=CASE WHEN excluded.http_homepage = '' THEN albums.http_homepage ELSE excluded.http_homepage END,
-            zip_mirrors=CASE WHEN excluded.zip_mirrors = '' THEN albums.zip_mirrors ELSE excluded.zip_mirrors END,
-            ocr_published=excluded.ocr_published,
-            status=excluded.status,
-            local_path=CASE WHEN excluded.local_path = '' THEN albums.local_path ELSE excluded.local_path END,
-            last_error=excluded.last_error
-    )"));
-    q.addBindValue(record.albumId);
-    q.addBindValue(record.slug);
-    q.addBindValue(record.title);
-    q.addBindValue(record.catalog);
-    q.addBindValue(record.classification);
-    q.addBindValue(record.released);
-    q.addBindValue(record.pageUrl);
-    q.addBindValue(record.torrentUrl);
-    q.addBindValue(record.httpHomepage);
-    q.addBindValue(joinList(record.zipMirrors));
-    q.addBindValue(record.ocrPublished ? 1 : 0);
-    q.addBindValue(record.status.isEmpty() ? QStringLiteral("available") : record.status);
-    q.addBindValue(record.localPath);
-    q.addBindValue(record.lastError);
-    if (!q.exec()) {
-        m_lastError = q.lastError().text();
-        return false;
-    }
-    return true;
-}
-
-AlbumRecord CatalogStore::album(int albumId) const
-{
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral(
-        "SELECT album_id, slug, title, catalog, classification, released, page_url, torrent_url, "
-        "http_homepage, zip_mirrors, ocr_published, status, local_path, last_error "
-        "FROM albums WHERE album_id=?"));
-    q.addBindValue(albumId);
-    if (q.exec() && q.next())
-        return albumFromQuery(q);
-    return {};
-}
-
-QVector<AlbumRecord> CatalogStore::albums(const QString &search) const
-{
-    QVector<AlbumRecord> out;
-    QSqlQuery q(db());
-    const QString columns = QStringLiteral(
-        "SELECT album_id, slug, title, catalog, classification, released, page_url, torrent_url, "
-        "http_homepage, zip_mirrors, ocr_published, status, local_path, last_error FROM albums");
-    if (search.trimmed().isEmpty()) {
-        q.exec(columns + QStringLiteral(" ORDER BY album_id DESC"));
-    } else {
-        const QString like = QLatin1Char('%') + escapeLike(search.trimmed()) + QLatin1Char('%');
-        q.prepare(columns + QStringLiteral(R"(
-            WHERE title LIKE ? ESCAPE '\' OR catalog LIKE ? ESCAPE '\' OR slug LIKE ? ESCAPE '\'
-            ORDER BY album_id DESC
-        )"));
-        q.addBindValue(like);
-        q.addBindValue(like);
-        q.addBindValue(like);
-        q.exec();
-    }
-    while (q.next())
-        out.push_back(albumFromQuery(q));
-    return out;
-}
-
-QVector<AlbumRecord> CatalogStore::albumsNeedingDownload() const
-{
-    QVector<AlbumRecord> out;
-    QSqlQuery q(db());
-    q.exec(QStringLiteral(
-        "SELECT album_id, slug, title, catalog, classification, released, page_url, torrent_url, "
-        "http_homepage, zip_mirrors, ocr_published, status, local_path, last_error FROM albums "
-        "WHERE ocr_published=1 AND status NOT IN ('downloaded', 'catalog-only', 'in-torrent') "
-        "ORDER BY album_id"));
-    while (q.next())
-        out.push_back(albumFromQuery(q));
-    return out;
-}
-
-int CatalogStore::albumCount() const
-{
-    return countQuery(QStringLiteral("SELECT COUNT(*) FROM albums"));
-}
-
-int CatalogStore::albumDownloadedCount() const
-{
-    return countQuery(QStringLiteral("SELECT COUNT(*) FROM albums WHERE status='downloaded'"));
-}
-
-int CatalogStore::albumTorrentCoveredCount() const
-{
-    return countQuery(QStringLiteral("SELECT COUNT(*) FROM albums WHERE status='in-torrent'"));
-}
-
-int CatalogStore::albumNeedingCount() const
-{
-    return countQuery(QStringLiteral(
-        "SELECT COUNT(*) FROM albums WHERE ocr_published=1 AND status NOT IN ('downloaded', 'catalog-only', 'in-torrent')"));
-}
-
-void CatalogStore::setMeta(const QString &key, const QString &value)
-{
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"));
-    q.addBindValue(key);
-    q.addBindValue(value);
-    if (!q.exec())
-        m_lastError = q.lastError().text();
-}
-
-QString CatalogStore::meta(const QString &key) const
-{
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("SELECT value FROM meta WHERE key=?"));
-    q.addBindValue(key);
-    if (q.exec() && q.next())
-        return q.value(0).toString();
-    return {};
-}
-
-void CatalogStore::markExistingFiles(const QString &libraryPath)
-{
-    if (libraryPath.isEmpty() || !m_open)
-        return;
-
-    const QDir remixDir(libraryPath + QStringLiteral("/remixes"));
-    const QDir albumDir(libraryPath + QStringLiteral("/albums"));
-    const QDir collectionDir(libraryPath + QStringLiteral("/collections"));
-
-    if (!db().transaction())
-        return;
-
-    auto remixesAll = remixes();
-    QHash<int, int> remixIndex;
-    remixIndex.reserve(remixesAll.size());
-    for (int i = 0; i < remixesAll.size(); ++i)
-        remixIndex.insert(remixesAll[i].ocrNumber, i);
-
-    auto markRemixPath = [&](RemixRecord &r, const QString &path) {
-        r.localPath = path;
-        r.status = path.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
-            ? QStringLiteral("in-torrent")
-            : QStringLiteral("downloaded");
-        r.lastError.clear();
-        updateRemix(r);
-    };
-
-    for (auto &r : remixesAll) {
-        if (!r.localPath.isEmpty() && QFileInfo::exists(r.localPath)) {
-            const QString status = r.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
-                ? QStringLiteral("in-torrent")
-                : QStringLiteral("downloaded");
-            if (r.status != status) {
-                r.status = status;
-                updateRemix(r);
-            }
-            continue;
-        }
-        for (const auto &mirror : r.mirrors) {
-            const QString name = QFileInfo(QUrl(mirror).path()).fileName();
-            if (name.isEmpty())
-                continue;
-            const QString candidate = remixDir.filePath(name);
-            if (QFileInfo::exists(candidate)) {
-                markRemixPath(r, candidate);
-                break;
-            }
-        }
-    }
-
-    if (collectionDir.exists()) {
-        QDirIterator it(collectionDir.absolutePath(),
-                        QStringList{QStringLiteral("*.mp3"), QStringLiteral("*.ogg"),
-                                    QStringLiteral("*.flac"), QStringLiteral("*.m4a")},
-                        QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            const QString path = it.next();
-            const int number = ocrNumberFromFileName(QFileInfo(path).fileName());
-            if (number <= 0 || !remixIndex.contains(number))
-                continue;
-            auto &r = remixesAll[remixIndex.value(number)];
-            if (r.status == QLatin1String("downloaded") && QFileInfo::exists(r.localPath))
-                continue;
-            markRemixPath(r, path);
-        }
-    }
-
-    auto albumsAll = albums();
-    for (auto &a : albumsAll) {
-        if (!a.localPath.isEmpty() && QFileInfo::exists(a.localPath)) {
-            const QString status = a.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
-                ? QStringLiteral("in-torrent")
-                : QStringLiteral("downloaded");
-            if (a.status != status) {
-                a.status = status;
-                updateAlbum(a);
-            }
-            continue;
-        }
-        const QString zipName = a.catalog.isEmpty() ? a.slug + QStringLiteral(".zip") : a.catalog + QStringLiteral(".zip");
-        const QString zipPath = albumDir.filePath(zipName);
-        if (QFileInfo::exists(zipPath)) {
-            a.localPath = zipPath;
-            a.status = QStringLiteral("downloaded");
-            a.lastError.clear();
-            updateAlbum(a);
-            continue;
-        }
-        for (const auto &mirror : a.zipMirrors) {
-            const QString name = QFileInfo(QUrl(mirror).path()).fileName();
-            if (name.isEmpty())
-                continue;
-            const QString candidate = albumDir.filePath(name);
-            if (QFileInfo::exists(candidate)) {
-                a.localPath = candidate;
-                a.status = QStringLiteral("downloaded");
-                a.lastError.clear();
-                updateAlbum(a);
-                break;
-            }
-        }
-    }
-
-    db().commit();
 }
