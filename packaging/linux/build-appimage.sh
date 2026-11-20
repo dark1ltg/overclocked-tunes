@@ -19,9 +19,11 @@ if [[ -n "${CXX_COMPILER}" ]]; then
 fi
 if [[ -n "${QT_ROOT_DIR:-}" ]]; then
   CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}")
+  CMAKE_ARGS+=(-DCMAKE_BUILD_RPATH="${QT_ROOT_DIR}/lib")
+  export LD_LIBRARY_PATH="${QT_ROOT_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 fi
 cmake "${CMAKE_ARGS[@]}"
-cmake --build "${BUILD}" -j"$(nproc)"
+cmake --build "${BUILD}" --target OCRCatalog -j"$(nproc)"
 DESTDIR="${APPDIR}" cmake --install "${BUILD}"
 
 ICON_SRC="${ROOT}/src/resources/icons/org.ocrcatalog.OCRCatalog.svg"
@@ -60,20 +62,27 @@ if [[ -z "${QMAKE}" ]]; then
 fi
 export LINUXDEPLOY_OUTPUT_VERSION="${LINUXDEPLOY_OUTPUT_VERSION:-1.0.0}"
 export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-sqldrivers;tls;iconengines;imageformats}"
+export APPIMAGE_EXTRACT_AND_RUN=1
 export PATH="${BUILD}:${PATH}"
+
+LD_ARGS=()
+if [[ -n "${QT_ROOT_DIR:-}" && -d "${QT_ROOT_DIR}/lib" ]]; then
+  shopt -s nullglob
+  for lib in "${QT_ROOT_DIR}/lib"/libicu*.so*; do
+    if [[ -f "${lib}" && ! -L "${lib}" ]]; then
+      LD_ARGS+=(--library "${lib}")
+    fi
+  done
+  shopt -u nullglob
+fi
+
 cd "${BUILD}"
-# Extract linuxdeploy if FUSE is unavailable (common in CI/containers).
-run_ld() {
-  if "${LINUXDEPLOY}" --appimage-extract-and-run "$@" 2>/dev/null; then
-    return 0
-  fi
-  "${LINUXDEPLOY}" "$@"
-}
-run_ld \
+"${LINUXDEPLOY}" \
   --appdir "${APPDIR}" \
   --desktop-file "${APPDIR}/org.ocrcatalog.OCRCatalog.desktop" \
   --icon-file "${APPDIR}/org.ocrcatalog.OCRCatalog.png" \
   --plugin qt \
+  "${LD_ARGS[@]}" \
   --output appimage
 
 mkdir -p "${DIST}"

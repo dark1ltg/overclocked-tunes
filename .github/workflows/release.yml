@@ -42,7 +42,13 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          archives: "qtbase qtsvg qtmultimedia qttools"
+          archives: "icu qtbase qtsvg qtmultimedia qttools"
+      - name: Confirm bundled ICU
+        run: |
+          test -n "$QT_ROOT_DIR"
+          ls "$QT_ROOT_DIR/lib"/libicu*
+          test -e "$QT_ROOT_DIR/lib/libicui18n.so.73" \
+            || test -e "$QT_ROOT_DIR/lib/libicui18n.so"
       - name: Generate icon
         run: python3 packaging/linux/generate-icon.py
       - name: Build AppImage
@@ -68,7 +74,10 @@ jobs:
           version: "6.8.3"
           archives: "qtbase qtsvg qtmultimedia qttools"
       - name: NSIS
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Build installer
         shell: pwsh
         env:

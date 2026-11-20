@@ -1,2 +1,2 @@
 v1.0.0
-# rebuild: self-contained AppImage + Qt 6.8.3
+# rebuild: bundle ICU in AppImage, AGL stub for DMG, NSIS full path

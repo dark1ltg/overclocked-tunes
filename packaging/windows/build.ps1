@@ -11,10 +11,9 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Root $DistDir) | Out-Null
 cmake -S $Root -B (Join-Path $Root $BuildDir) -DCMAKE_BUILD_TYPE=Release
 cmake --build (Join-Path $Root $BuildDir) --config Release
 
-$QtDir = $env:Qt6_DIR
-if (-not $QtDir) {
-    $qmake = Get-Command windeployqt -ErrorAction SilentlyContinue
-} else {
+$QtDir = $env:QT_ROOT_DIR
+if (-not $QtDir) { $QtDir = $env:Qt6_DIR }
+if ($QtDir -and (Test-Path (Join-Path $QtDir "bin"))) {
     $env:PATH = "$(Join-Path $QtDir 'bin');$env:PATH"
 }
 
@@ -53,9 +52,25 @@ $zip = Join-Path $Root "$DistDir/OCRCatalog-windows.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
 
-if (Get-Command makensis -ErrorAction SilentlyContinue) {
-    $nsi = Join-Path $PSScriptRoot "installer.nsi"
-    makensis "/DSTAGE=$stage" "/DOUT=$(Join-Path $Root $DistDir)" $nsi
+function Find-Makensis {
+    foreach ($p in @(
+            (Get-Command makensis -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "${env:ProgramFiles}\NSIS\makensis.exe",
+            "C:\Program Files (x86)\NSIS\makensis.exe"
+        )) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
+    return $null
+}
+$makensis = Find-Makensis
+if (-not $makensis) {
+    throw "makensis not found. Install NSIS so the self-contained setup .exe can be built."
+}
+$nsi = Join-Path $PSScriptRoot "installer.nsi"
+& $makensis "/DSTAGE=$stage" "/DOUT=$(Join-Path $Root $DistDir)" $nsi
+if ($LASTEXITCODE -ne 0) {
+    throw "makensis failed with exit code $LASTEXITCODE"
 }
 
 Write-Host "Windows artifacts in $DistDir"
