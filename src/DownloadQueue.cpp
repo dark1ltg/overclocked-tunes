@@ -469,7 +469,6 @@ bool DownloadQueue::downloadRemix(RemixRecord record)
             return true;
         }
         lastError = result.error + QStringLiteral(" (") + mirror + QLatin1Char(')');
-        QFile::replace(dest);
         QFile::remove(dest);
     }
 
