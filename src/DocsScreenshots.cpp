@@ -42,9 +42,6 @@ void MainWindow::openSettingsDialog(const QString &screenshotPath)
         if (!dir.isEmpty())
             lib->setText(dir);
     });
-    auto *conc = new QSpinBox;
-    conc->setRange(1, 3);
-    conc->setValue(Settings::instance().concurrency());
     auto *delay = new QSpinBox;
     delay->setRange(250, 2000);
     delay->setSuffix(tr(" ms"));
@@ -63,14 +60,14 @@ void MainWindow::openSettingsDialog(const QString &screenshotPath)
     }
     auto *openTorrents = new QCheckBox(tr("Also open collection torrents in the system BitTorrent client"));
     openTorrents->setChecked(Settings::instance().openTorrents());
-    form->addRow(tr("Library"), libRow);
-    form->addRow(tr("HTTPS connections"), conc);
-    form->addRow(tr("Polite delay"), delay);
-    auto *note = new QLabel(tr("Catalog downloads start with the two official packs "
-                              "(OCR 1–4000 and 4001–4473). HTTPS mirrors are used for newer tracks "
-                              "and for anything the in-app torrent engine cannot take. "
+    auto *note = new QLabel(tr("Download missing waits for the two official packs (OCR 1–4000 and 4001–4473), "
+                              "then album torrents one by one, then leftover tracks one by one. "
+                              "Closing the app stops network use but keeps torrent resume data and "
+                              "partial HTTPS files so the next launch can continue. "
                               "Only bt.ocremix.org torrents are accepted."));
     note->setWordWrap(true);
+    form->addRow(tr("Library"), libRow);
+    form->addRow(tr("Polite delay"), delay);
     form->addRow(tr("Note"), note);
     form->addRow(torrents);
     form->addRow(inAppTorrents);
@@ -96,7 +93,6 @@ void MainWindow::openSettingsDialog(const QString &screenshotPath)
         return;
     const QString newLib = lib->text().trimmed();
     Settings::instance().setLibraryPath(newLib);
-    Settings::instance().setConcurrency(conc->value());
     Settings::instance().setRequestDelayMs(delay->value());
     Settings::instance().setIncludeAlbums(albums->isChecked());
     Settings::instance().setPreferTorrents(torrents->isChecked());
