@@ -449,3 +449,284 @@ void CatalogStore::upsertAlbums(const QVector<AlbumRecord> &records)
     else
         db().rollback();
 }
+
+bool CatalogStore::updateAlbum(const AlbumRecord &record)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(R"(
+        INSERT INTO albums (album_id, slug, title, catalog, classification, released, page_url,
+                            torrent_url, http_homepage, zip_mirrors, ocr_published, status, local_path, last_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(album_id) DO UPDATE SET
+            slug=CASE WHEN excluded.slug = '' THEN albums.slug ELSE excluded.slug END,
+            title=CASE WHEN excluded.title = '' THEN albums.title ELSE excluded.title END,
+            catalog=CASE WHEN excluded.catalog = '' THEN albums.catalog ELSE excluded.catalog END,
+            classification=CASE WHEN excluded.classification = '' THEN albums.classification ELSE excluded.classification END,
+            released=CASE WHEN excluded.released = '' THEN albums.released ELSE excluded.released END,
+            page_url=CASE WHEN excluded.page_url = '' THEN albums.page_url ELSE excluded.page_url END,
+            torrent_url=CASE WHEN excluded.torrent_url = '' THEN albums.torrent_url ELSE excluded.torrent_url END,
+            http_homepage=CASE WHEN excluded.http_homepage = '' THEN albums.http_homepage ELSE excluded.http_homepage END,
+            zip_mirrors=CASE WHEN excluded.zip_mirrors = '' THEN albums.zip_mirrors ELSE excluded.zip_mirrors END,
+            ocr_published=excluded.ocr_published,
+            status=excluded.status,
+            local_path=CASE WHEN excluded.local_path = '' THEN albums.local_path ELSE excluded.local_path END,
+            last_error=excluded.last_error
+    )"));
+    q.addBindValue(record.albumId);
+    q.addBindValue(record.slug);
+    q.addBindValue(record.title);
+    q.addBindValue(record.catalog);
+    q.addBindValue(record.classification);
+    q.addBindValue(record.released);
+    q.addBindValue(record.pageUrl);
+    q.addBindValue(record.torrentUrl);
+    q.addBindValue(record.httpHomepage);
+    q.addBindValue(joinList(record.zipMirrors));
+    q.addBindValue(record.ocrPublished ? 1 : 0);
+    q.addBindValue(record.status.isEmpty() ? QStringLiteral("available") : record.status);
+    q.addBindValue(record.localPath);
+    q.addBindValue(record.lastError);
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+AlbumRecord CatalogStore::album(int albumId) const
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "SELECT album_id, slug, title, catalog, classification, released, page_url, torrent_url, "
+        "http_homepage, zip_mirrors, ocr_published, status, local_path, last_error "
+        "FROM albums WHERE album_id=?"));
+    q.addBindValue(albumId);
+    if (q.exec() && q.next())
+        return albumFromQuery(q);
+    return {};
+}
+
+QVector<AlbumRecord> CatalogStore::albums(const QString &search) const
+{
+    QVector<AlbumRecord> out;
+    QSqlQuery q(db());
+    const QString columns = QStringLiteral(
+        "SELECT album_id, slug, title, catalog, classification, released, page_url, torrent_url, "
+        "http_homepage, zip_mirrors, ocr_published, status, local_path, last_error FROM albums");
+    if (search.trimmed().isEmpty()) {
+        q.exec(columns + QStringLiteral(" ORDER BY album_id DESC"));
+    } else {
+        const QString like = QLatin1Char('%') + escapeLike(search.trimmed()) + QLatin1Char('%');
+        q.prepare(columns + QStringLiteral(R"(
+            WHERE title LIKE ? ESCAPE '\' OR catalog LIKE ? ESCAPE '\' OR slug LIKE ? ESCAPE '\'
+            ORDER BY album_id DESC
+        )"));
+        q.addBindValue(like);
+        q.addBindValue(like);
+        q.addBindValue(like);
+        q.exec();
+    }
+    while (q.next())
+        out.push_back(albumFromQuery(q));
+    return out;
+}
+
+QVector<AlbumRecord> CatalogStore::albumsNeedingDownload() const
+{
+    QVector<AlbumRecord> out;
+    QSqlQuery q(db());
+    q.exec(QStringLiteral(
+        "SELECT album_id, slug, title, catalog, classification, released, page_url, torrent_url, "
+        "http_homepage, zip_mirrors, ocr_published, status, local_path, last_error FROM albums "
+        "WHERE ocr_published=1 AND status NOT IN ('downloaded', 'catalog-only', 'in-torrent') "
+        "ORDER BY album_id"));
+    while (q.next())
+        out.push_back(albumFromQuery(q));
+    return out;
+}
+
+int CatalogStore::albumCount() const
+{
+    return countQuery(QStringLiteral("SELECT COUNT(*) FROM albums"));
+}
+
+int CatalogStore::albumDownloadedCount() const
+{
+    return countQuery(QStringLiteral("SELECT COUNT(*) FROM albums WHERE status='downloaded'"));
+}
+
+int CatalogStore::albumTorrentCoveredCount() const
+{
+    return countQuery(QStringLiteral("SELECT COUNT(*) FROM albums WHERE status='in-torrent'"));
+}
+
+int CatalogStore::albumNeedingCount() const
+{
+    return countQuery(QStringLiteral(
+        "SELECT COUNT(*) FROM albums WHERE ocr_published=1 AND status NOT IN ('downloaded', 'catalog-only', 'in-torrent')"));
+}
+
+void CatalogStore::setMeta(const QString &key, const QString &value)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"));
+    q.addBindValue(key);
+    q.addBindValue(value);
+    if (!q.exec())
+        m_lastError = q.lastError().text();
+}
+
+QString CatalogStore::meta(const QString &key) const
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("SELECT value FROM meta WHERE key=?"));
+    q.addBindValue(key);
+    if (q.exec() && q.next())
+        return q.value(0).toString();
+    return {};
+}
+
+void CatalogStore::markExistingFiles(const QString &libraryPath, bool resetMissing)
+{
+    if (libraryPath.isEmpty() || !m_open)
+        return;
+
+    const QDir remixDir(libraryPath + QStringLiteral("/remixes"));
+    const QDir albumDir(libraryPath + QStringLiteral("/albums"));
+    const QDir collectionDir(libraryPath + QStringLiteral("/collections"));
+
+    if (!beginWrite())
+        return;
+
+    auto remixesAll = remixes();
+    QHash<int, int> remixIndex;
+    remixIndex.reserve(remixesAll.size());
+    for (int i = 0; i < remixesAll.size(); ++i)
+        remixIndex.insert(remixesAll[i].ocrNumber, i);
+
+    int steps = 0;
+    auto pumpUi = [&]() {
+        if ((++steps % 100) == 0)
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+
+    auto markRemixPath = [&](RemixRecord &r, const QString &path) {
+        r.localPath = path;
+        r.status = path.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
+            ? QStringLiteral("in-torrent")
+            : QStringLiteral("downloaded");
+        r.lastError.clear();
+        updateRemix(r);
+        pumpUi();
+    };
+
+    for (auto &r : remixesAll) {
+        if (!r.localPath.isEmpty() && QFileInfo::exists(r.localPath) && !QFileInfo(r.localPath).isDir()) {
+            const QString status = r.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)
+                ? QStringLiteral("in-torrent")
+                : QStringLiteral("downloaded");
+            if (r.status != status) {
+                r.status = status;
+                updateRemix(r);
+            }
+            pumpUi();
+            continue;
+        }
+        for (const auto &mirror : r.mirrors) {
+            const QString name = QFileInfo(QUrl(mirror).fileName()).fileName();
+            if (name.isEmpty())
+                continue;
+            const QString candidate = remixDir.filePath(name);
+            if (QFileInfo::exists(candidate) && QFileInfo(candidate).isFile()) {
+                markRemixPath(r, candidate);
+                break;
+            }
+        }
+    }
+
+    if (collectionDir.exists()) {
+        QDirIterator it(collectionDir.absolutePath(),
+                        QStringList{QStringLiteral("*.mp3"), QStringLiteral("*.ogg"),
+                                    QStringLiteral("*.flac"), QStringLiteral("*.m4a")},
+                        QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString path = it.next();
+            const int number = ocrNumberFromFileName(QFileInfo(path).fileName());
+            if (number <= 0 || !remixIndex.contains(number))
+                continue;
+            auto &r = remixesAll[remixIndex.value(number)];
+            if (r.status == QLatin1String("downloaded") && QFileInfo::exists(r.localPath)
+                && QFileInfo(r.localPath).isFile())
+                continue;
+            markRemixPath(r, path);
+        }
+    }
+
+    if (resetMissing) {
+        for (auto &r : remixesAll) {
+            const bool haveFile = !r.localPath.isEmpty() && QFileInfo::exists(r.localPath)
+                && !QFileInfo(r.localPath).isDir()
+                && !r.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive);
+            if (haveFile)
+                continue;
+            if (r.status != QLatin1String("downloaded") && r.status != QLatin1String("in-torrent"))
+                continue;
+            r.localPath.clear();
+            r.status = QStringLiteral("available");
+            r.lastError.clear();
+            updateRemix(r);
+            pumpUi();
+        }
+    }
+
+    auto albumsAll = albums();
+    for (auto &a : albumsAll) {
+        pumpUi();
+        if (!a.localPath.isEmpty() && QFileInfo::exists(a.localPath)
+            && !a.localPath.endsWith(QLatin1String(".torrent"), Qt::CaseInsensitive)) {
+            if (a.status != QLatin1String("downloaded")) {
+                a.status = QStringLiteral("downloaded");
+                updateAlbum(a);
+            }
+            continue;
+        }
+        auto takePath = [&](const QString &path, bool dirOk) {
+            if (path.isEmpty() || !QFileInfo::exists(path))
+                return false;
+            if (!dirOk && QFileInfo(path).isDir())
+                return false;
+            a.localPath = path;
+            a.status = QStringLiteral("downloaded");
+            a.lastError.clear();
+            updateAlbum(a);
+            return true;
+        };
+        const QString zipName = a.catalog.isEmpty() ? a.slug + QStringLiteral(".zip") : a.catalog + QStringLiteral(".zip");
+        if (takePath(albumDir.filePath(zipName), false))
+            continue;
+        bool found = false;
+        for (const auto &mirror : a.zipMirrors) {
+            const QString name = QFileInfo(QUrl(mirror).fileName()).fileName();
+            if (name.isEmpty())
+                continue;
+            if (takePath(albumDir.filePath(name), false)) {
+                found = true;
+                break;
+            }
+        }
+        if (found)
+            continue;
+        if (!a.catalog.isEmpty() && takePath(albumDir.filePath(a.catalog), true))
+            continue;
+        if (!a.slug.isEmpty() && takePath(albumDir.filePath(a.slug), true))
+            continue;
+        if (resetMissing && (a.status == QLatin1String("downloaded") || a.status == QLatin1String("in-torrent"))) {
+            a.localPath.clear();
+            a.status = a.ocrPublished ? QStringLiteral("available") : QStringLiteral("catalog-only");
+            a.lastError.clear();
+            updateAlbum(a);
+        }
+    }
+
+    db().commit();
+}
