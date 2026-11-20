@@ -1,2 +1,2 @@
-v1.0.0
-# rebuild: AppImage sqlite-only SQL plugins (skip mimer/mysql/odbc)
+v1.0.1
+# in-app libtorrent on Windows and macOS, not only Linux
