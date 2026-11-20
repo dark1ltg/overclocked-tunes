@@ -153,6 +153,13 @@ int main(int, char **)
     if (six.size() != 1 || six.first().ocrId != QStringLiteral("OCR100000") || six.first().ocrNumber != 100000)
         return fail(QStringLiteral("six digit ocr id"));
 
+    if (HtmlParsers::unescape(QStringLiteral("A &#38; B")) != QStringLiteral("A & B"))
+        return fail(QStringLiteral("decimal entity"));
+    if (HtmlParsers::unescape(QStringLiteral("Caf&#xE9;")) != QStringLiteral("Caf") + QChar(0xE9))
+        return fail(QStringLiteral("hex entity"));
+    if (HtmlParsers::unescape(QStringLiteral("&quot;quoted&quot;")) != QStringLiteral("\"quoted\""))
+        return fail(QStringLiteral("named entity"));
+
     QTextStream(stdout) << "parser tests OK (" << remixes.size() << " remixes, "
                         << albums.size() << " albums, torrents through OCR"
                         << coverage.lastCoveredRemix << ")" << Qt::endl;
