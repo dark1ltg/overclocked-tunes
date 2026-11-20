@@ -8,13 +8,13 @@ OCR Catalog is not affiliated with OverClocked ReMix. It only uses download link
 
 ## Download
 
-Use a ready-made build from [Releases](https://github.com/dark1ltg/overclocked-tunes/releases/latest). Each version has three files:
+Use a ready-made build from [Releases](https://github.com/dark1ltg/overclocked-tunes/releases/latest).
 
 | You use | Grab this |
 | --- | --- |
-| Linux | `OCRCatalog-v*-x86_64.AppImage` |
-| Windows | `OCRCatalog-v*-setup.exe` |
-| macOS | `OCRCatalog-v*-macos.dmg` |
+| Linux | `OCRCatalog-v1.0.1-x86_64.AppImage` from [v1.0.1](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.1) |
+| Windows | `OCRCatalog-v1.0.0-setup.exe` from [v1.0.0](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.0) |
+| macOS | `OCRCatalog-v1.0.1-macos.dmg` from [v1.0.1](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.1) |
 
 Each one is a self-contained app. Qt and the libraries it needs are inside the file. GitHub also attaches source zip/tar.gz on that page; those are the code, not the app.
 
@@ -39,7 +39,7 @@ First launch looks like this until you sync:
 - [OCR 1–4000](https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_1_to_4000_[v20201028].torrent)
 - [OCR 4001–4473](https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_4001_to_4473_(Q2_2023_update).torrent)
 
-Linux, Windows, and macOS builds fetch those torrents **inside the app** (libtorrent). Only files from `https://bt.ocremix.org/torrents/` are accepted. There is no magnet box and no way to add other torrents. Remixes after OCR 4473, and albums those packs do not list, come from the site's HTTPS mirrors. Official albums prefer the tracker `.torrent`; a ZIP is used only when there is no torrent.
+Linux and macOS v1.0.1 builds fetch those torrents **inside the app** (libtorrent). Only files from `https://bt.ocremix.org/torrents/` are accepted. There is no magnet box and no way to add other torrents. The current Windows installer is still [v1.0.0](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.0); it saves the official `.torrent` files so you can open them in qBittorrent, Transmission, or Deluge. Remixes after OCR 4473, and albums those packs do not list, come from the site's HTTPS mirrors. Official albums prefer the tracker `.torrent`; a ZIP is used only when there is no torrent.
 
 ![Download queue](docs/screenshots/queue.png)
 

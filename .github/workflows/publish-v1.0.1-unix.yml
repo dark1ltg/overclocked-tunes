@@ -1,0 +1,78 @@
+name: Publish Linux and macOS v1.0.1
+
+# One-shot: attach the already-built AppImage and DMG to a GitHub Release.
+# Windows stays on the v1.0.0 installer. Cancels the in-progress 3-platform cut
+# so it cannot attach a v1.0.1 .exe later.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-v1.0.1-unix.yml"
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-appimage
+          run-id: 44660650062
+          github-token: ${{ github.token }}
+          path: artifacts/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          run-id: 44660650062
+          github-token: ${{ github.token }}
+          path: artifacts/macos
+      - name: Cancel in-progress Windows cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel 44660650062 --repo "${{ github.repository }}" || true
+      - name: Confirm Linux and macOS packages
+        run: |
+          find artifacts -type f | sort
+          test "$(find artifacts -name '*.AppImage' | wc -l)" -ge 1
+          test "$(find artifacts -name '*.dmg' | wc -l)" -ge 1
+          find artifacts -name '*.exe' -delete
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.1
+          name: OCR Catalog v1.0.1
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/*.AppImage
+            artifacts/**/*.dmg
+          body: |
+            Linux and macOS builds for OCR Catalog v1.0.1. Both include the in-app official torrent client (libtorrent). Only torrents from bt.ocremix.org are accepted.
+
+            **Windows** stays on [v1.0.0](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.0) (`OCRCatalog-v1.0.0-setup.exe`) for now.
+
+            - Linux: `OCRCatalog-v1.0.1-x86_64.AppImage`
+            - macOS: `OCRCatalog-v1.0.1-macos.dmg`
+
+  strip-windows-asset:
+    if: github.event_name == 'release' && github.event.release.tag_name == 'v1.0.1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep v1.0.1 free of a Windows installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          names="$(gh release view v1.0.1 --repo "${{ github.repository }}" --json assets --jq '.assets[].name')"
+          echo "$names"
+          for name in $names; do
+            case "$name" in
+              *.exe)
+                gh release delete-asset v1.0.1 "$name" --repo "${{ github.repository }}" --yes
+                ;;
+            esac
+          done

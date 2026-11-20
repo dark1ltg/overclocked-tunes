@@ -66,6 +66,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: ${{ false }}
     runs-on: windows-latest
     env:
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
@@ -91,7 +92,7 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y
-          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "C:\\Program Files (x86)\\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Build installer
         shell: pwsh
         env:
@@ -137,7 +138,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [linux, windows, macos]
+    needs: [linux, macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -147,8 +148,8 @@ jobs:
         run: |
           find artifacts -type f | sort
           test "$(find artifacts -name '*.AppImage' | wc -l)" -ge 1
-          test "$(find artifacts -name '*.exe' | wc -l)" -ge 1
           test "$(find artifacts -name '*.dmg' | wc -l)" -ge 1
+          find artifacts -name '*.exe' -delete
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag }}
@@ -157,14 +158,14 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             artifacts/**/*.AppImage
-            artifacts/**/*.exe
             artifacts/**/*.dmg
           body: |
             Desktop builds for OCR Catalog ${{ inputs.tag }}:
 
             - Linux AppImage
-            - Windows installer (`.exe`)
             - macOS disk image (`.dmg`)
 
-            Linux, Windows, and macOS builds include the in-app official torrent client
+            Linux and macOS builds include the in-app official torrent client
             (libtorrent). Only torrents from bt.ocremix.org are accepted.
+
+            Windows stays on the v1.0.0 installer for now.
