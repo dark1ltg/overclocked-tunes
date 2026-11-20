@@ -1,5 +1,6 @@
 #pragma once
 
+#include "JobGate.h"
 #include "Types.h"
 
 #include <QObject>
@@ -13,6 +14,7 @@ public:
     explicit CatalogSync(QObject *parent = nullptr);
 
     void setDelayMs(int ms) { m_delayMs = ms; }
+    void setJobGate(JobGate *gate) { m_gate = gate; }
     void cancel();
     bool isRunning() const { return m_running; }
 
@@ -28,6 +30,7 @@ signals:
 private:
     bool fetchPages(const QString &listUrl, bool albums, int *outGot, int *outListed);
     int m_delayMs = 400;
+    JobGate *m_gate = nullptr;
     std::atomic<bool> m_cancel{false};
     std::atomic<bool> m_running{false};
 };

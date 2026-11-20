@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CatalogStore.h"
+#include "JobGate.h"
 #include "Types.h"
 
 #include <QMainWindow>
@@ -75,6 +76,7 @@ private:
     QTableWidgetItem *taggedItem(const QString &text, const QString &id) const;
 
     CatalogStore m_store;
+    JobGate m_jobGate;
     QThread m_worker;
     CatalogSync *m_sync = nullptr;
     DownloadQueue *m_downloads = nullptr;

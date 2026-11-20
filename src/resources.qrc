@@ -3,5 +3,6 @@
   <qresource prefix="/">
     <file alias="theme.qss">resources/theme.qss</file>
     <file alias="icons/org.ocrcatalog.OCRCatalog.svg">resources/icons/org.ocrcatalog.OCRCatalog.svg</file>
+    <file alias="icons/check.svg">resources/icons/check.svg</file>
   </qresource>
 </RCC>

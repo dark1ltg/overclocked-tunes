@@ -40,10 +40,11 @@ public:
     void setMeta(const QString &key, const QString &value);
     QString meta(const QString &key) const;
 
-    void markExistingFiles(const QString &libraryPath);
+    void markExistingFiles(const QString &libraryPath, bool resetMissing = true);
 
 private:
     bool exec(const QString &sql);
+    bool beginWrite();
     QSqlDatabase db() const;
     RemixRecord remixFromQuery(const class QSqlQuery &q) const;
     AlbumRecord albumFromQuery(const class QSqlQuery &q) const;
