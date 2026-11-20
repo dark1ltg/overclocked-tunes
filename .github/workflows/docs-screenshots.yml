@@ -1,0 +1,50 @@
+name: README screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/MainWindow.cpp
+      - src/MainWindow.h
+      - src/main.cpp
+      - .github/workflows/docs-screenshots.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-screenshots
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools libqt6sql6-sqlite \
+            qt6-svg-dev qt6-multimedia-dev cmake ninja-build g++ libgl1-mesa-dev \
+            libtorrent-rasterbar-dev pkg-config
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target OCRCatalog
+      - name: Grab the real Qt UI
+        run: |
+          mkdir -p docs/screenshots
+          QT_QPA_PLATFORM=offscreen ./build/OCRCatalog --docs-screenshots docs/screenshots
+      - name: Commit screenshots
+        run: |
+          git add docs/screenshots/*.png
+          git rm -f --ignore-unmatch docs/screenshots/_binprobe.png
+          if git diff --cached --quiet; then
+            echo "Screenshots unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add README screenshots captured from the Qt widgets. [skip ci]"
+          git push

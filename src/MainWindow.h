@@ -33,6 +33,7 @@ public:
 
     bool ready();
     QString storeError() const { return m_store.lastError(); }
+    int writeDocsScreenshots(const QString &outputDir);
 
 private slots:
     void chooseLibrary();
@@ -58,6 +59,7 @@ private slots:
     void onTorrentCompleted(const QString &name, const QString &savePath);
 
 private:
+    void openSettingsDialog(const QString &screenshotPath);
     void buildUi();
     void setupWorkers();
     void shutdownWorkers();
