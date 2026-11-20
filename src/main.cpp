@@ -2,12 +2,15 @@
 #include "HtmlParsers.h"
 #include "HttpClient.h"
 #include "MainWindow.h"
+#include "Settings.h"
 #include "Types.h"
 #include "appinfo.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QFile>
 #include <QIcon>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QVector>
 
@@ -109,6 +112,14 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_WIN
     SetConsoleOutputCP(65001);
 #endif
+    for (int i = 1; i < argc; ++i) {
+        if (qstrcmp(argv[i], "--docs-screenshots") == 0) {
+            qputenv("QT_QPA_PLATFORM", qgetenv("QT_QPA_PLATFORM").isEmpty()
+                                            ? QByteArray("offscreen")
+                                            : qgetenv("QT_QPA_PLATFORM"));
+            break;
+        }
+    }
     QApplication app(argc, argv);
     app.setApplicationName(QString::fromLatin1(AppInfo::name()));
     app.setApplicationVersion(QString::fromLatin1(AppInfo::version()));
@@ -123,6 +134,21 @@ int main(int argc, char *argv[])
     const QStringList args = app.arguments();
     if (args.contains(QStringLiteral("--smoke")))
         return runSmoke();
+
+    const int shot = args.indexOf(QStringLiteral("--docs-screenshots"));
+    if (shot >= 0) {
+        QStandardPaths::setTestModeEnabled(true);
+        for (auto loc : {QStandardPaths::AppDataLocation, QStandardPaths::AppConfigLocation})
+            QDir(QStandardPaths::writableLocation(loc)).removeRecursively();
+        Settings::instance().setMenuInstallPrompted(true);
+        MainWindow window;
+        if (!window.ready())
+            return 1;
+        const QString dir = (shot + 1 < args.size() && !args.at(shot + 1).startsWith(QLatin1Char('-')))
+            ? args.at(shot + 1)
+            : QStringLiteral("docs/screenshots");
+        return window.writeDocsScreenshots(dir);
+    }
 
     qRegisterMetaType<RemixRecord>("RemixRecord");
     qRegisterMetaType<AlbumRecord>("AlbumRecord");
