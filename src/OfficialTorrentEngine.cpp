@@ -105,7 +105,7 @@ void OfficialTorrentEngine::start()
         return;
     try {
         lt::settings_pack pack;
-        pack.set_str(lt::settings_pack::user_agent, "OCRCatalog/1.0.1");
+        pack.set_str(lt::settings_pack::user_agent, "OCRCatalog/1.0.2");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error | lt::alert_category::status | lt::alert_category::storage);
         pack.set_bool(lt::settings_pack::enable_dht, true);
