@@ -22,7 +22,7 @@ Section "Install"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "DisplayName" "OCR Catalog"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "Publisher" "OCR Catalog"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "DisplayVersion" "1.0.1"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "DisplayVersion" "1.0.2"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "UninstallString" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "DisplayIcon" "$INSTDIR\OCRCatalog.exe"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OCRCatalog" "NoModify" 1

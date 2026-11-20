@@ -1,2 +1,2 @@
-v1.0.1
-# recut: compile OfficialTorrentEngine against libtorrent 2.1 ABI 100
+v1.0.2
+# sequential download pipeline + queue Play/Resume; Linux AppImage + macOS DMG
