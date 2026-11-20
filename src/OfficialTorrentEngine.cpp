@@ -13,6 +13,7 @@
 #ifdef OCRCATALOG_HAS_TORRENT
 #include <libtorrent/add_torrent_params.hpp>
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/bdecode.hpp>
 #include <libtorrent/hex.hpp>
 #include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/session.hpp>
@@ -27,6 +28,48 @@ static QString hashToHex(const lt::info_hash_t &hashes)
 {
     const lt::sha1_hash best = hashes.get_best();
     return QString::fromLatin1(QByteArray(best.data(), static_cast<int>(lt::sha1_hash::size())).toHex());
+}
+
+static QString bdecodeString(const lt::bdecode_node &node)
+{
+    if (node.type() != lt::bdecode_node::string_t)
+        return {};
+    return QString::fromUtf8(node.string_ptr(), node.string_length());
+}
+
+// torrent_info::trackers() is hidden on libtorrent 2.1 with TORRENT_ABI_VERSION 100
+// (vcpkg default). Read announce / announce-list from the .torrent instead.
+static bool torrentFileHasOfficialTracker(const QString &torrentFile)
+{
+    QFile file(torrentFile);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray bytes = file.readAll();
+    if (bytes.isEmpty())
+        return false;
+
+    lt::error_code ec;
+    lt::bdecode_node root;
+    const int rc = lt::bdecode(bytes.constData(), bytes.constData() + bytes.size(), root, ec);
+    if (rc != 0 || ec || root.type() != lt::bdecode_node::dict_t)
+        return false;
+
+    if (OfficialTorrentPolicy::isOfficialTrackerUrl(bdecodeString(root.dict_find("announce"))))
+        return true;
+
+    const lt::bdecode_node list = root.dict_find_list("announce-list");
+    if (list.type() != lt::bdecode_node::list_t)
+        return false;
+    for (int i = 0; i < list.list_size(); ++i) {
+        const lt::bdecode_node tier = list.list_at(i);
+        if (tier.type() != lt::bdecode_node::list_t)
+            continue;
+        for (int j = 0; j < tier.list_size(); ++j) {
+            if (OfficialTorrentPolicy::isOfficialTrackerUrl(bdecodeString(tier.list_at(j))))
+                return true;
+        }
+    }
+    return false;
 }
 #endif
 
@@ -235,14 +278,7 @@ bool OfficialTorrentEngine::addOfficialTorrent(const QString &sourceUrl, const Q
         return false;
     }
 
-    bool officialTracker = false;
-    for (const auto &tracker : info->trackers()) {
-        if (OfficialTorrentPolicy::isOfficialTrackerUrl(QString::fromStdString(tracker.url))) {
-            officialTracker = true;
-            break;
-        }
-    }
-    if (!officialTracker) {
+    if (!torrentFileHasOfficialTracker(torrentFile)) {
         emit torrentFailed(QFileInfo(torrentFile).fileName(),
                            tr("Rejected: torrent does not use an OC ReMix tracker."));
         return false;
@@ -343,8 +379,14 @@ void OfficialTorrentEngine::poll()
                 emit jobUpdated(job);
                 emit torrentCompleted(job.displayName, QString::fromStdString(st.save_path));
             } else if (auto *err = lt::alert_cast<lt::torrent_error_alert>(alert)) {
-                emit torrentFailed(QString::fromStdString(err->torrent_name()),
-                                   QString::fromStdString(err->message()));
+                QString name;
+                try {
+                    name = QString::fromStdString(err->handle.status().name);
+                } catch (const std::exception &) {
+                }
+                if (name.isEmpty())
+                    name = QString::fromStdString(err->message());
+                emit torrentFailed(name, QString::fromStdString(err->error.message()));
             } else if (auto *rd = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
                 const QString savePath = QString::fromStdString(rd->params.save_path);
                 writeResumeFile(savePath, hashToHex(rd->params.info_hashes),

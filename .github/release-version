@@ -1,2 +1,2 @@
 v1.0.1
-# in-app libtorrent on Windows and macOS, not only Linux
+# recut: compile OfficialTorrentEngine against libtorrent 2.1 ABI 100
