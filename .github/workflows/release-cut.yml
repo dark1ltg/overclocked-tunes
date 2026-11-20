@@ -28,7 +28,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
           else
-            TAG="$(tr -d '[:space:]' < .github/release-version)"
+            TAG="$(grep -E '^v[0-9]' .github/release-version | head -1 | tr -d '[:space:]')"
           fi
           case "$TAG" in
             v[0-9]*) ;;

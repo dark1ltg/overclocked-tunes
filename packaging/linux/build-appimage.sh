@@ -17,6 +17,9 @@ CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTAL
 if [[ -n "${CXX_COMPILER}" ]]; then
   CMAKE_ARGS+=(-DCMAKE_CXX_COMPILER="${CXX_COMPILER}")
 fi
+if [[ -n "${QT_ROOT_DIR:-}" ]]; then
+  CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}")
+fi
 cmake "${CMAKE_ARGS[@]}"
 cmake --build "${BUILD}" -j"$(nproc)"
 DESTDIR="${APPDIR}" cmake --install "${BUILD}"
@@ -46,9 +49,18 @@ if [[ ! -x "${LINUXDEPLOY}" ]]; then
   chmod +x "${LINUXDEPLOY}" "${PLUGIN}"
 fi
 
-export QMAKE="$(command -v qmake6 || command -v qmake)"
+if [[ -n "${QT_ROOT_DIR:-}" && -x "${QT_ROOT_DIR}/bin/qmake" ]]; then
+  export QMAKE="${QT_ROOT_DIR}/bin/qmake"
+else
+  export QMAKE="$(command -v qmake6 || command -v qmake)"
+fi
+if [[ -z "${QMAKE}" ]]; then
+  echo "qmake not found; Qt must be on PATH or QT_ROOT_DIR" >&2
+  exit 1
+fi
 export LINUXDEPLOY_OUTPUT_VERSION="${LINUXDEPLOY_OUTPUT_VERSION:-1.0.0}"
 export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-sqldrivers;tls;iconengines;imageformats}"
+export PATH="${BUILD}:${PATH}"
 cd "${BUILD}"
 # Extract linuxdeploy if FUSE is unavailable (common in CI/containers).
 run_ld() {
@@ -66,9 +78,16 @@ run_ld \
 
 mkdir -p "${DIST}"
 shopt -s nullglob
+copied=0
 for image in "${BUILD}"/*.AppImage OCRCatalog*.AppImage; do
   if [[ -f "${image}" && "${image}" != *linuxdeploy* ]]; then
     cp "${image}" "${DIST}/OCRCatalog-${LINUXDEPLOY_OUTPUT_VERSION}-${ARCH}.AppImage"
+    copied=1
   fi
 done
+if [[ "${copied}" -eq 0 ]]; then
+  echo "linuxdeploy did not produce an AppImage" >&2
+  ls -la "${BUILD}" >&2 || true
+  exit 1
+fi
 ls -l "${DIST}"

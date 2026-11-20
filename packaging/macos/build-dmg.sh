@@ -4,7 +4,11 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUILD="${ROOT}/build/macos"
 DIST="${ROOT}/dist"
 mkdir -p "${BUILD}" "${DIST}"
-cmake -S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release
+CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release)
+if [[ -n "${QT_ROOT_DIR:-}" ]]; then
+  CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}")
+fi
+cmake "${CMAKE_ARGS[@]}"
 cmake --build "${BUILD}" -j"$(sysctl -n hw.ncpu)"
 APP="${BUILD}/OCRCatalog.app"
 macdeployqt "${APP}"
