@@ -4,6 +4,8 @@
 #include "HttpClient.h"
 #include "appinfo.h"
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QThread>
 #include <QUrl>
 
@@ -113,7 +115,10 @@ bool CatalogSync::fetchPages(const QString &listUrl, bool albums, int *outGot, i
     auto fetchOffset = [&](int offset) -> int {
         if (m_cancel)
             return -1;
-        QThread::msleep(static_cast<unsigned long>(m_delayMs));
+        for (int slept = 0; slept < m_delayMs && !m_cancel; slept += 50) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(50);
+        }
         const QString url = listUrl.arg(offset);
         const auto page = http.get(url);
         if (m_cancel)

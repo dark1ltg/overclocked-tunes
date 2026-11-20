@@ -29,7 +29,10 @@ public slots:
     void cancelActive();
     bool addOfficialTorrent(const QString &sourceUrl, const QString &torrentFile, const QString &savePath,
                             const QString &itemId = {});
+    bool pauseItem(const QString &itemId);
+    bool resumeItem(const QString &itemId);
     bool hasActiveTorrents() const;
+    bool hasUnfinishedTorrents() const;
     void poll();
 
 signals:
@@ -42,9 +45,11 @@ private:
     void writeResumeFile(const QString &savePath, const QString &hashHex, const std::vector<char> &buf);
     QString resumePath(const QString &savePath, const QString &hashHex) const;
     QString jobIdForName(const QString &name) const;
+    DownloadJob::Kind kindForName(const QString &name) const;
     std::unique_ptr<libtorrent::session> m_session;
     QTimer *m_timer = nullptr;
     QHash<QString, QString> m_jobIds;
+    QHash<QString, int> m_jobKinds;
     int m_pendingResume = 0;
     bool m_stopped = false;
 #endif

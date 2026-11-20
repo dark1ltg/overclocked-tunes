@@ -9,6 +9,7 @@
 #include <QStringList>
 #include <QThread>
 
+class QCloseEvent;
 class QLabel;
 class QLineEdit;
 class QProgressBar;
@@ -34,6 +35,9 @@ public:
     bool ready();
     QString storeError() const { return m_store.lastError(); }
     int writeDocsScreenshots(const QString &outputDir);
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     void chooseLibrary();
@@ -71,6 +75,10 @@ private:
     void updateStatus();
     void ensureLibrary();
     void applyJobToQueueTable(const DownloadJob &job);
+    bool playOrResumeQueueRow(int row);
+    bool playRemixRecord(RemixRecord record);
+    bool playAlbumRecord(AlbumRecord record);
+    void playLocalFile(const QString &path, const QString &title);
     QVector<int> selectedRemixRows() const;
     QVector<int> selectedAlbumRows() const;
     RemixRecord remixAtRow(int row) const;

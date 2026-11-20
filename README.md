@@ -29,8 +29,8 @@ First launch looks like this until you sync:
 1. **Library…** — pick a folder for music, albums, and official torrents.
 2. **Sync catalog** — pulls the public remix and album lists into a local SQLite catalog.
 3. Search by title, game, artist, or OCR ID.
-4. **Download missing** — official collection torrents first, then HTTPS for anything those packs do not cover.
-5. Select a row for details. **Play** plays a downloaded MP3 (or opens the file if this build has no Qt Multimedia).
+4. **Download missing** — the two official collection torrents first (and waits until both finish), then album torrents one by one, then leftover tracks one by one. Tracks already pulled from those torrents are skipped.
+5. Select a row for details. **Play / Resume** plays a downloaded MP3, or resumes a paused/cancelled item on the Queue tab. Closing the app stops in-app torrents and HTTPS downloads so they do not keep using the network.
 
 ![Albums tab](docs/screenshots/albums.png)
 
@@ -39,7 +39,9 @@ First launch looks like this until you sync:
 - [OCR 1–4000](https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_1_to_4000_[v20201028].torrent)
 - [OCR 4001–4473](https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_4001_to_4473_(Q2_2023_update).torrent)
 
-Linux and macOS v1.0.1 builds fetch those torrents **inside the app** (libtorrent). Only files from `https://bt.ocremix.org/torrents/` are accepted. There is no magnet box and no way to add other torrents. The current Windows installer is still [v1.0.0](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.0); it saves the official `.torrent` files so you can open them in qBittorrent, Transmission, or Deluge. Remixes after OCR 4473, and albums those packs do not list, come from the site's HTTPS mirrors. Official albums prefer the tracker `.torrent`; a ZIP is used only when there is no torrent.
+Linux and macOS v1.0.1 builds fetch those torrents **inside the app** (libtorrent). Only files from `https://bt.ocremix.org/torrents/` are accepted. There is no magnet box and no way to add other torrents. The current Windows installer is still [v1.0.0](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.0); it saves the official `.torrent` files so you can open them in qBittorrent, Transmission, or Deluge.
+
+After both collection packs finish, album torrents run one at a time. Then leftover remixes (typically after OCR 4473) download over HTTPS, one at a time, skipping anything already on disk from those torrents. A ZIP is used for an album only when there is no official torrent. Closing the app stops in-app torrents and HTTPS transfers so they do not keep using the network; torrent resume data and partial HTTPS files are saved so the next launch can continue from there.
 
 ![Download queue](docs/screenshots/queue.png)
 

@@ -24,6 +24,7 @@ public:
 
     void setCancelFlag(std::atomic<bool> *flag) { m_cancel = flag; }
     void abort();
+    void resetAbort();
 
     Result get(const QString &url, int timeoutMs = 30000);
     Result downloadToFile(const QString &url, const QString &destPath, int timeoutMs = 120000,
