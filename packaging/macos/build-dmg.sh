@@ -19,8 +19,17 @@ if [[ ! -d "${SDK_AGL}" ]]; then
   export CMAKE_FRAMEWORK_PATH="${STUB_ROOT}${CMAKE_FRAMEWORK_PATH:+:${CMAKE_FRAMEWORK_PATH}}"
 fi
 
-CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release)
-if [[ -n "${QT_ROOT_DIR:-}" ]]; then
+if command -v brew >/dev/null 2>&1; then
+  brew install libtorrent-rasterbar pkg-config dylibbundler
+  BREW_PREFIX="$(brew --prefix)"
+  export PKG_CONFIG_PATH="${BREW_PREFIX}/lib/pkgconfig:${BREW_PREFIX}/opt/openssl@3/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="${QT_ROOT_DIR:+${QT_ROOT_DIR}:}${BREW_PREFIX}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+fi
+
+CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release -DOCR_REQUIRE_TORRENT=ON)
+if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
+  CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}")
+elif [[ -n "${QT_ROOT_DIR:-}" ]]; then
   CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}")
 fi
 if [[ -d "${STUB_ROOT}/AGL.framework" ]]; then
@@ -31,6 +40,21 @@ cmake "${CMAKE_ARGS[@]}"
 cmake --build "${BUILD}" --target OCRCatalog -j"$(sysctl -n hw.ncpu)"
 APP="${BUILD}/OCRCatalog.app"
 macdeployqt "${APP}"
+mkdir -p "${APP}/Contents/Frameworks"
+if command -v dylibbundler >/dev/null 2>&1; then
+  DYLIB_ARGS=(-od -b
+    -x "${APP}/Contents/MacOS/OCRCatalog"
+    -d "${APP}/Contents/Frameworks"
+    -p @executable_path/../Frameworks)
+  if command -v brew >/dev/null 2>&1; then
+    BREW_PREFIX="$(brew --prefix)"
+    DYLIB_ARGS+=(-s "${BREW_PREFIX}/lib" -s "${BREW_PREFIX}/opt/openssl@3/lib")
+  fi
+  dylibbundler "${DYLIB_ARGS[@]}"
+else
+  echo "dylibbundler is required to bundle libtorrent into the .app" >&2
+  exit 1
+fi
 # Copy plugins into the .app BEFORE wrapping it in a DMG.
 QT_PLUGINS="$("$(command -v qmake6 || command -v qmake)" -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
 if [[ -n "${QT_PLUGINS}" ]]; then

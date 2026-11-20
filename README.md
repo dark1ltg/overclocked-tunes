@@ -8,13 +8,13 @@ OCR Catalog is not affiliated with OverClocked ReMix. It only uses download link
 
 ## Download
 
-Use a ready-made build from [Releases](https://github.com/dark1ltg/overclocked-tunes/releases/tag/v1.0.0). Each version has three files:
+Use a ready-made build from [Releases](https://github.com/dark1ltg/overclocked-tunes/releases/latest). Each version has three files:
 
 | You use | Grab this |
 | --- | --- |
-| Linux | `OCRCatalog-v1.0.0-x86_64.AppImage` |
-| Windows | `OCRCatalog-v1.0.0-setup.exe` |
-| macOS | `OCRCatalog-v1.0.0-macos.dmg` |
+| Linux | `OCRCatalog-v*-x86_64.AppImage` |
+| Windows | `OCRCatalog-v*-setup.exe` |
+| macOS | `OCRCatalog-v*-macos.dmg` |
 
 Each one is a self-contained app. Qt and the libraries it needs are inside the file. GitHub also attaches source zip/tar.gz on that page; those are the code, not the app.
 
@@ -39,11 +39,11 @@ First launch looks like this until you sync:
 - [OCR 1–4000](https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_1_to_4000_[v20201028].torrent)
 - [OCR 4001–4473](https://bt.ocremix.org/torrents/OC_ReMix_Collection_-_4001_to_4473_(Q2_2023_update).torrent)
 
-Linux builds fetch those torrents **inside the app** (libtorrent). Only files from `https://bt.ocremix.org/torrents/` are accepted. There is no magnet box and no way to add other torrents. Remixes after OCR 4473, and albums those packs do not list, come from the site's HTTPS mirrors. Official albums prefer the tracker `.torrent`; a ZIP is used only when there is no torrent.
+Linux, Windows, and macOS builds fetch those torrents **inside the app** (libtorrent). Only files from `https://bt.ocremix.org/torrents/` are accepted. There is no magnet box and no way to add other torrents. Remixes after OCR 4473, and albums those packs do not list, come from the site's HTTPS mirrors. Official albums prefer the tracker `.torrent`; a ZIP is used only when there is no torrent.
 
 ![Download queue](docs/screenshots/queue.png)
 
-Windows and macOS still save the official `.torrent` files so you can open them in qBittorrent, Transmission, or Deluge. This is not a general BitTorrent client.
+This is not a general BitTorrent client. If you turn off in-app torrents in Settings, the official `.torrent` files are still saved so you can open them in qBittorrent, Transmission, or Deluge.
 
 ![Settings](docs/screenshots/settings.png)
 
@@ -54,7 +54,7 @@ library/
   remixes/       MP3s fetched from HTTPS mirrors
   albums/        album ZIPs when a ZIP mirror exists
   torrents/      official collection and album .torrent files
-  collections/   files the in-app engine writes from those torrents (Linux)
+  collections/   files the in-app engine writes from those torrents
 ```
 
 The catalog database lives in the Qt app-data directory, not in this folder. Files you already have are skipped.
@@ -63,7 +63,7 @@ The catalog database lives in the Qt app-data directory, not in this folder. Fil
 
 Skip this unless you are changing the code. Everyone else should use the release files above.
 
-You need CMake 3.16+, a C++17 compiler, and Qt 6 (Widgets, Network, Sql/SQLite, Svg). Optional: Qt Multimedia for in-app playback, and libtorrent-rasterbar on Linux for in-app official torrents.
+You need CMake 3.16+, a C++17 compiler, Qt 6 (Widgets, Network, Sql/SQLite, Svg), and libtorrent-rasterbar for in-app official torrents. Optional: Qt Multimedia for in-app playback. On Windows the release build uses vcpkg (`vcpkg.json`). On macOS, Homebrew `libtorrent-rasterbar` is enough.
 
 ```bash
 git clone https://github.com/dark1ltg/overclocked-tunes.git

@@ -13,7 +13,7 @@ CXX_COMPILER="${CXX:-}"
 if [[ -z "${CXX_COMPILER}" && -x /usr/bin/g++ ]]; then
   CXX_COMPILER=/usr/bin/g++
 fi
-CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr)
+CMAKE_ARGS=(-S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DOCR_REQUIRE_TORRENT=ON)
 if [[ -n "${CXX_COMPILER}" ]]; then
   CMAKE_ARGS+=(-DCMAKE_CXX_COMPILER="${CXX_COMPILER}")
 fi

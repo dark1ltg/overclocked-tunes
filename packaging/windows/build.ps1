@@ -8,8 +8,28 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "../..")
 New-Item -ItemType Directory -Force -Path (Join-Path $Root $BuildDir) | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root $DistDir) | Out-Null
 
-cmake -S $Root -B (Join-Path $Root $BuildDir) -DCMAKE_BUILD_TYPE=Release
+$cmakeArgs = @(
+    "-S", $Root,
+    "-B", (Join-Path $Root $BuildDir),
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DOCR_REQUIRE_TORRENT=ON"
+)
+$generator = $env:CMAKE_GENERATOR
+if (-not $generator -or $generator -match "Visual Studio") {
+    $cmakeArgs += "-A", "x64"
+}
+if ($env:QT_ROOT_DIR) {
+    $cmakeArgs += "-DCMAKE_PREFIX_PATH=$($env:QT_ROOT_DIR)"
+}
+if ($env:VCPKG_ROOT) {
+    $toolchain = Join-Path $env:VCPKG_ROOT "scripts/buildsystems/vcpkg.cmake"
+    $cmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$toolchain"
+    $cmakeArgs += "-DVCPKG_TARGET_TRIPLET=x64-windows"
+}
+cmake @cmakeArgs
+if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 cmake --build (Join-Path $Root $BuildDir) --config Release
+if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
 $QtDir = $env:QT_ROOT_DIR
 if (-not $QtDir) { $QtDir = $env:Qt6_DIR }
@@ -27,6 +47,27 @@ Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Copy-Item $exe $stage
 windeployqt --release --compiler-runtime (Join-Path $stage "OCRCatalog.exe")
+
+function Find-VcpkgBin {
+    foreach ($p in @(
+            (Join-Path $Root "$BuildDir/vcpkg_installed/x64-windows/bin"),
+            (Join-Path $Root "vcpkg_installed/x64-windows/bin"),
+            ($(if ($env:VCPKG_ROOT) { Join-Path $env:VCPKG_ROOT "installed/x64-windows/bin" } else { $null }))
+        )) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
+    return $null
+}
+$vcpkgBin = Find-VcpkgBin
+if (-not $vcpkgBin) {
+    throw "vcpkg libtorrent runtime DLLs not found. Set VCPKG_ROOT and install the libtorrent port."
+}
+Copy-Item (Join-Path $vcpkgBin "*.dll") $stage
+$torrentDll = Get-ChildItem $vcpkgBin -Filter "*torrent*.dll" | Select-Object -First 1
+if (-not $torrentDll) {
+    throw "libtorrent DLL not found in $vcpkgBin"
+}
+Write-Host "Copied libtorrent runtime DLLs from $vcpkgBin ($($torrentDll.Name))"
 function Copy-QtPluginDir($name) {
     $src = $null
     if ($QtDir) {

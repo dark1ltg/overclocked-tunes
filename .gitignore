@@ -11,3 +11,5 @@ CMakeLists.txt.user
 *.exe
 install_manifest.txt
 .cache/
+vcpkg_installed/
+vcpkg/

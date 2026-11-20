@@ -1,0 +1,10 @@
+{
+  "name": "ocrcatalog",
+  "version-string": "1.0.1",
+  "dependencies": [
+    {
+      "name": "libtorrent",
+      "default-features": false
+    }
+  ]
+}
