@@ -619,7 +619,74 @@ void MainWindow::pauseDownloads()
 
 void MainWindow::openSettings()
 {
-    openSettingsDialog({});
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Settings"));
+    auto *form = new QFormLayout(&dlg);
+    auto *lib = new QLineEdit(Settings::instance().libraryPath());
+    auto *browse = new QPushButton(tr("Browse…"));
+    auto *libRow = new QWidget;
+    auto *libLayout = new QHBoxLayout(libRow);
+    libLayout->setContentsMargins(0, 0, 0, 0);
+    libLayout->addWidget(lib, 1);
+    libLayout->addWidget(browse);
+    connect(browse, &QPushButton::clicked, &dlg, [this, lib]() {
+        const QString dir = QFileDialog::getExistingDirectory(this, tr("Library folder"), lib->text());
+        if (!dir.isEmpty())
+            lib->setText(dir);
+    });
+    auto *delay = new QSpinBox;
+    delay->setRange(250, 2000);
+    delay->setSuffix(tr(" ms"));
+    delay->setValue(Settings::instance().requestDelayMs());
+    auto *albums = new QCheckBox(tr("Include official OC ReMix albums when downloading missing items"));
+    albums->setChecked(Settings::instance().includeAlbums());
+    auto *torrents = new QCheckBox(tr("Use official torrents first for the back-catalog (recommended)"));
+    torrents->setChecked(Settings::instance().preferTorrents());
+    auto *inAppTorrents = new QCheckBox(tr("Download official OC ReMix torrents inside this app"));
+    inAppTorrents->setChecked(Settings::instance().downloadOfficialTorrentsInApp());
+    if (!OfficialTorrentEngine::available()) {
+        inAppTorrents->setChecked(false);
+        inAppTorrents->setEnabled(false);
+        inAppTorrents->setToolTip(tr("This build was compiled without libtorrent. Save the official "
+                                     ".torrent files and open them in a BitTorrent client."));
+    }
+    auto *openTorrents = new QCheckBox(tr("Also open collection torrents in the system BitTorrent client"));
+    openTorrents->setChecked(Settings::instance().openTorrents());
+    auto *note = new QLabel(tr("Download missing waits for the two official packs (OCR 1–4000 and 4001–4473), "
+                               "then album torrents one by one, then leftover tracks one by one. "
+                               "Closing the app stops network use but keeps torrent resume data and "
+                               "partial HTTPS files so the next launch can continue. "
+                               "Only bt.ocremix.org torrents are accepted."));
+    note->setWordWrap(true);
+    form->addRow(tr("Library"), libRow);
+    form->addRow(tr("Polite delay"), delay);
+    form->addRow(tr("Note"), note);
+    form->addRow(torrents);
+    form->addRow(inAppTorrents);
+    form->addRow(openTorrents);
+    form->addRow(albums);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    const QString newLib = lib->text().trimmed();
+    Settings::instance().setLibraryPath(newLib);
+    Settings::instance().setRequestDelayMs(delay->value());
+    Settings::instance().setIncludeAlbums(albums->isChecked());
+    Settings::instance().setPreferTorrents(torrents->isChecked());
+    Settings::instance().setDownloadOfficialTorrentsInApp(inAppTorrents->isChecked());
+    Settings::instance().setOpenTorrents(openTorrents->isChecked());
+    if (!newLib.isEmpty()) {
+        QDir().mkpath(newLib + QStringLiteral("/remixes"));
+        QDir().mkpath(newLib + QStringLiteral("/albums"));
+        QDir().mkpath(newLib + QStringLiteral("/torrents"));
+        QDir().mkpath(newLib + QStringLiteral("/collections"));
+        m_store.markExistingFiles(newLib);
+        reloadTables();
+    }
+    updateStatus();
 }
 
 void MainWindow::installMenu()
