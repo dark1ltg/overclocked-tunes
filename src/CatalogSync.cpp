@@ -21,6 +21,12 @@ void CatalogSync::start()
 {
     if (m_running.exchange(true))
         return;
+    JobGateLock lock(m_gate);
+    if (!lock) {
+        m_running = false;
+        emit finished(false, tr("A download is already running. Finish or cancel it first."));
+        return;
+    }
     m_cancel = false;
 
     int remixGot = 0;

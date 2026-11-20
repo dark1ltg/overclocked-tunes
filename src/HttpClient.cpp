@@ -114,6 +114,12 @@ HttpClient::Result HttpClient::downloadToFile(const QString &url, const QString 
     const int idleTimeout = timeoutMs > 0 ? timeoutMs : 120000;
     req.setTransferTimeout(idleTimeout);
 
+    if (destPath.trimmed().isEmpty() || destPath.endsWith(QLatin1Char('/'))
+        || QFileInfo(destPath).isDir()) {
+        result.error = QStringLiteral("Refusing to write to %1").arg(destPath);
+        return result;
+    }
+
     const QString tmpPath = destPath + QStringLiteral(".part");
     QDir().mkpath(QFileInfo(destPath).absolutePath());
     QFile file(tmpPath);
@@ -123,19 +129,37 @@ HttpClient::Result HttpClient::downloadToFile(const QString &url, const QString 
     }
 
     QNetworkReply *reply = m_nam.get(req);
-    QObject::connect(reply, &QNetworkReply::readyRead, this, [&]() { file.write(reply->readAll()); });
+    bool writeOk = true;
+    auto writeChunk = [&](const QByteArray &chunk) {
+        if (!writeOk || chunk.isEmpty())
+            return;
+        const qint64 n = file.write(chunk);
+        if (n != chunk.size())
+            writeOk = false;
+    };
+    QObject::connect(reply, &QNetworkReply::readyRead, this, [&]() { writeChunk(reply->readAll()); });
     QObject::connect(reply, &QNetworkReply::downloadProgress, this, [&](qint64 done, qint64 total) {
         if (progress)
             progress(done, total);
     });
     waitFor(reply, 0);
-    file.write(reply->readAll());
+    writeChunk(reply->readAll());
+    if (!file.flush())
+        writeOk = false;
     file.close();
+    if (file.error() != QFile::NoError)
+        writeOk = false;
 
     result.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     result.finalUrl = reply->url().toString();
     if (cancelled()) {
         result.error = QStringLiteral("Cancelled");
+        QFile::remove(tmpPath);
+        reply->deleteLater();
+        return result;
+    }
+    if (!writeOk) {
+        result.error = QStringLiteral("Write failed for %1 (disk full?)").arg(tmpPath);
         QFile::remove(tmpPath);
         reply->deleteLater();
         return result;
