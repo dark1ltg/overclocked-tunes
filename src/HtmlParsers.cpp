@@ -53,6 +53,30 @@ QString unescape(QString text)
 {
     QString prev;
     int guard = 0;
+    QRegularExpression decEntity(QStringLiteral(R"(&#(\d{1,7});)"));
+    QRegularExpression hexEntity(QStringLiteral(R"(&#x([0-9a-fA-F]{1,6});)"),
+                                 QRegularExpression::CaseInsensitiveOption);
+    auto replaceNumeric = [](QString in, const QRegularExpression &re, int base) {
+        QString out;
+        out.reserve(in.size());
+        int pos = 0;
+        auto it = re.globalMatch(in);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            out += in.mid(pos, m.capturedStart() - pos);
+            bool ok = false;
+            const uint cp = m.captured(1).toUInt(&ok, base);
+            if (ok && cp != 0 && cp <= 0x10FFFF) {
+                const char32_t u = static_cast<char32_t>(cp);
+                out += QString::fromUcs4(&u, 1);
+            } else {
+                out += m.captured(0);
+            }
+            pos = m.capturedEnd();
+        }
+        out += in.mid(pos);
+        return out;
+    };
     while (text != prev && guard++ < 4) {
         prev = text;
         text.replace(QLatin1String("&nbsp;"), QLatin1String(" "));
@@ -62,6 +86,8 @@ QString unescape(QString text)
         text.replace(QLatin1String("&apos;"), QLatin1String("'"));
         text.replace(QLatin1String("&lt;"), QLatin1String("<"));
         text.replace(QLatin1String("&gt;"), QLatin1String(">"));
+        text = replaceNumeric(text, decEntity, 10);
+        text = replaceNumeric(text, hexEntity, 16);
     }
     return text.trimmed();
 }
