@@ -24,6 +24,11 @@ void HttpClient::abort()
         m_reply->abort();
 }
 
+void HttpClient::resetAbort()
+{
+    m_abortRequested = false;
+}
+
 bool HttpClient::cancelled() const
 {
     return m_abortRequested || (m_cancel && m_cancel->load());
@@ -95,6 +100,20 @@ HttpClient::Result HttpClient::get(const QString &url, int timeoutMs)
     return result;
 }
 
+namespace {
+
+qint64 contentRangeTotal(const QByteArray &header)
+{
+    const int slash = header.lastIndexOf('/');
+    if (slash < 0)
+        return 0;
+    bool ok = false;
+    const qint64 total = header.mid(slash + 1).trimmed().toLongLong(&ok);
+    return (ok && total > 0) ? total : 0;
+}
+
+} // namespace
+
 HttpClient::Result HttpClient::downloadToFile(const QString &url, const QString &destPath, int timeoutMs,
                                               const std::function<void(qint64, qint64)> &progress)
 {
@@ -122,25 +141,97 @@ HttpClient::Result HttpClient::downloadToFile(const QString &url, const QString 
 
     const QString tmpPath = destPath + QStringLiteral(".part");
     QDir().mkpath(QFileInfo(destPath).absolutePath());
+    qint64 resumeAt = 0;
+    {
+        const QFileInfo partInfo(tmpPath);
+        if (partInfo.exists() && partInfo.isFile() && partInfo.size() > 0)
+            resumeAt = partInfo.size();
+    }
+    if (resumeAt > 0)
+        req.setRawHeader(QByteArrayLiteral("Range"),
+                         QByteArrayLiteral("bytes=") + QByteArray::number(resumeAt) + '-');
+
     QFile file(tmpPath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    const QIODevice::OpenMode openMode = resumeAt > 0
+        ? (QIODevice::WriteOnly | QIODevice::Append)
+        : (QIODevice::WriteOnly | QIODevice::Truncate);
+    if (!file.open(openMode)) {
         result.error = QStringLiteral("Cannot write %1").arg(tmpPath);
         return result;
     }
 
     QNetworkReply *reply = m_nam.get(req);
+    m_reply = reply;
+
+    QEventLoop headerLoop;
+    QTimer headerPoll;
+    headerPoll.setInterval(200);
+    QObject::connect(&headerPoll, &QTimer::timeout, &headerLoop, [this, reply, &headerLoop]() {
+        if (cancelled()) {
+            reply->abort();
+            headerLoop.quit();
+        }
+    });
+    headerPoll.start();
+    QObject::connect(reply, &QNetworkReply::metaDataChanged, &headerLoop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &headerLoop, &QEventLoop::quit);
+    headerLoop.exec();
+    headerPoll.stop();
+
+    auto keepPartial = [&]() {
+        file.flush();
+        file.close();
+    };
+
+    if (cancelled()) {
+        keepPartial();
+        result.error = QStringLiteral("Cancelled");
+        reply->deleteLater();
+        m_reply = nullptr;
+        return result;
+    }
+
+    result.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    result.finalUrl = reply->url().toString();
+
+    if (resumeAt > 0 && result.status == 200) {
+        file.close();
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            result.error = QStringLiteral("Cannot rewrite %1").arg(tmpPath);
+            reply->deleteLater();
+            m_reply = nullptr;
+            return result;
+        }
+        resumeAt = 0;
+    }
+
     bool writeOk = true;
+    qint64 sinceFlush = 0;
     auto writeChunk = [&](const QByteArray &chunk) {
         if (!writeOk || chunk.isEmpty())
             return;
         const qint64 n = file.write(chunk);
-        if (n != chunk.size())
+        if (n != chunk.size()) {
             writeOk = false;
+            return;
+        }
+        sinceFlush += n;
+        if (sinceFlush >= 1024 * 1024) {
+            if (!file.flush())
+                writeOk = false;
+            sinceFlush = 0;
+        }
     };
     QObject::connect(reply, &QNetworkReply::readyRead, this, [&]() { writeChunk(reply->readAll()); });
     QObject::connect(reply, &QNetworkReply::downloadProgress, this, [&](qint64 done, qint64 total) {
-        if (progress)
-            progress(done, total);
+        if (!progress)
+            return;
+        const qint64 have = resumeAt + done;
+        qint64 knownTotal = resumeAt + total;
+        const QByteArray range = reply->rawHeader(QByteArrayLiteral("Content-Range"));
+        if (const qint64 rangeTotal = contentRangeTotal(range); rangeTotal > 0)
+            knownTotal = rangeTotal;
+        progress(have, knownTotal);
     });
     waitFor(reply, 0);
     writeChunk(reply->readAll());
@@ -154,20 +245,19 @@ HttpClient::Result HttpClient::downloadToFile(const QString &url, const QString 
     result.finalUrl = reply->url().toString();
     if (cancelled()) {
         result.error = QStringLiteral("Cancelled");
-        QFile::remove(tmpPath);
         reply->deleteLater();
         return result;
     }
     if (!writeOk) {
         result.error = QStringLiteral("Write failed for %1 (disk full?)").arg(tmpPath);
-        QFile::remove(tmpPath);
         reply->deleteLater();
         return result;
     }
     if (reply->error() != QNetworkReply::NoError || result.status < 200 || result.status >= 300) {
         result.error = reply->error() != QNetworkReply::NoError ? reply->errorString()
                                                                 : QStringLiteral("HTTP %1").arg(result.status);
-        QFile::remove(tmpPath);
+        if (result.status == 404)
+            QFile::remove(tmpPath);
         reply->deleteLater();
         return result;
     }
