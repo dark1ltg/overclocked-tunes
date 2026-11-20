@@ -94,6 +94,7 @@ QCheckBox::indicator, QRadioButton::indicator {
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {
     background: #c45c12;
     border-color: #e07020;
+    image: url(:/icons/check.svg);
 }
 QMessageBox, QDialog, QDialogButtonBox {
     background: #16110d;

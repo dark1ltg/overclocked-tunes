@@ -28,21 +28,26 @@ Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Copy-Item $exe $stage
 windeployqt --release --compiler-runtime (Join-Path $stage "OCRCatalog.exe")
-$sqlPlugin = $null
-if ($QtDir) {
-    $sqlPlugin = Join-Path $QtDir "plugins/sqldrivers"
-}
-if (-not $sqlPlugin -or -not (Test-Path $sqlPlugin)) {
-    $qmake = Get-Command qmake -ErrorAction SilentlyContinue
-    if ($qmake) {
-        $qtPrefix = & $qmake.Source -query QT_INSTALL_PLUGINS
-        $sqlPlugin = Join-Path $qtPrefix "sqldrivers"
+function Copy-QtPluginDir($name) {
+    $src = $null
+    if ($QtDir) {
+        $src = Join-Path $QtDir "plugins/$name"
+    }
+    if (-not $src -or -not (Test-Path $src)) {
+        $qmakeCmd = Get-Command qmake6 -ErrorAction SilentlyContinue
+        if (-not $qmakeCmd) { $qmakeCmd = Get-Command qmake -ErrorAction SilentlyContinue }
+        if ($qmakeCmd) {
+            $qtPrefix = & $qmakeCmd.Source -query QT_INSTALL_PLUGINS
+            $src = Join-Path $qtPrefix $name
+        }
+    }
+    if ($src -and (Test-Path $src)) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $stage $name) | Out-Null
+        Copy-Item (Join-Path $src "*") (Join-Path $stage $name) -ErrorAction SilentlyContinue
     }
 }
-if ($sqlPlugin -and (Test-Path $sqlPlugin)) {
-    New-Item -ItemType Directory -Force -Path (Join-Path $stage "sqldrivers") | Out-Null
-    Copy-Item (Join-Path $sqlPlugin "qsqlite*") (Join-Path $stage "sqldrivers") -ErrorAction SilentlyContinue
-}
+Copy-QtPluginDir "sqldrivers"
+Copy-QtPluginDir "tls"
 
 $zip = Join-Path $Root "$DistDir/OCRCatalog-windows.zip"
 if (Test-Path $zip) { Remove-Item $zip }
