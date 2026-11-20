@@ -18,10 +18,13 @@
 #include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/torrent_flags.hpp>
+#include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/torrent_status.hpp>
+#include <libtorrent/version.hpp>
 #include <libtorrent/write_resume_data.hpp>
 #include <stdexcept>
+#include <vector>
 namespace lt = libtorrent;
 
 static QString hashToHex(const lt::info_hash_t &hashes)
@@ -148,6 +151,7 @@ void OfficialTorrentEngine::writeResumeFile(const QString &savePath, const QStri
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return;
     file.write(buf.data(), static_cast<qint64>(buf.size()));
+    file.flush();
 }
 #endif
 
@@ -160,25 +164,51 @@ void OfficialTorrentEngine::stop()
     if (!m_session)
         return;
     try {
+        lt::settings_pack pack;
+        pack.set_bool(lt::settings_pack::enable_dht, false);
+        pack.set_bool(lt::settings_pack::enable_lsd, false);
+        pack.set_bool(lt::settings_pack::enable_upnp, false);
+        pack.set_bool(lt::settings_pack::enable_natpmp, false);
+        pack.set_int(lt::settings_pack::connections_limit, 0);
+        pack.set_int(lt::settings_pack::active_downloads, 0);
+        pack.set_int(lt::settings_pack::active_seeds, 0);
+        pack.set_int(lt::settings_pack::active_limit, 0);
+        m_session->apply_settings(pack);
         m_session->pause();
         m_pendingResume = 0;
-        for (const auto &handle : m_session->get_torrents()) {
+        std::vector<lt::torrent_handle> handles;
+        try {
+            handles = m_session->get_torrents();
+        } catch (const std::exception &) {
+        }
+        for (const auto &handle : handles) {
             if (!handle.is_valid())
                 continue;
-            handle.pause();
-            handle.save_resume_data(lt::torrent_handle::flush_disk_cache | lt::torrent_handle::save_info_dict);
-            ++m_pendingResume;
+            try {
+                handle.pause();
+                handle.flush_cache();
+                handle.save_resume_data(lt::torrent_handle::flush_disk_cache | lt::torrent_handle::save_info_dict);
+                ++m_pendingResume;
+            } catch (const std::exception &) {
+            }
         }
         QElapsedTimer timer;
         timer.start();
         while (m_pendingResume > 0 && timer.elapsed() < 8000) {
             poll();
             if (m_pendingResume > 0)
-                QThread::msleep(50);
+                QThread::msleep(20);
         }
+        // Keep every incomplete file and .fastresume on disk. abort() only
+        // tears down sockets and DHT so nothing keeps using the network.
+        lt::session_proxy proxy = m_session->abort();
+        m_session.reset();
+        (void)proxy;
+        m_jobIds.clear();
+        m_jobKinds.clear();
     } catch (const std::exception &) {
+        m_session.reset();
     }
-    m_session.reset();
 #endif
 }
 
@@ -192,11 +222,11 @@ void OfficialTorrentEngine::cancelActive()
             if (!handle.is_valid())
                 continue;
             handle.pause();
-            handle.save_resume_data(lt::torrent_handle::flush_disk_cache);
+            handle.save_resume_data(lt::torrent_handle::flush_disk_cache | lt::torrent_handle::save_info_dict);
             DownloadJob job;
-            job.kind = DownloadJob::CollectionTorrent;
             const auto st = handle.status();
             const QString name = QString::fromStdString(st.name);
+            job.kind = kindForName(name);
             job.itemId = jobIdForName(name);
             job.displayName = name;
             job.status = QStringLiteral("cancelled");
@@ -235,10 +265,118 @@ bool OfficialTorrentEngine::hasActiveTorrents() const
     return false;
 }
 
+bool OfficialTorrentEngine::hasUnfinishedTorrents() const
+{
+#ifdef OCRCATALOG_HAS_TORRENT
+    if (!m_session)
+        return false;
+    try {
+        for (const auto &handle : m_session->get_torrents()) {
+            if (!handle.is_valid())
+                continue;
+            const auto st = handle.status();
+            if (st.is_finished)
+                continue;
+            if (st.errc)
+                continue;
+            return true;
+        }
+    } catch (const std::exception &) {
+        return false;
+    }
+#endif
+    return false;
+}
+
+bool OfficialTorrentEngine::pauseItem(const QString &itemId)
+{
+#ifdef OCRCATALOG_HAS_TORRENT
+    if (!m_session || itemId.isEmpty())
+        return false;
+    try {
+        for (const auto &handle : m_session->get_torrents()) {
+            if (!handle.is_valid())
+                continue;
+            const auto st = handle.status();
+            const QString name = QString::fromStdString(st.name);
+            if (jobIdForName(name) != itemId)
+                continue;
+            handle.pause();
+            handle.save_resume_data(lt::torrent_handle::flush_disk_cache | lt::torrent_handle::save_info_dict);
+            DownloadJob job;
+            job.kind = kindForName(name);
+            job.itemId = itemId;
+            job.displayName = name;
+            job.status = QStringLiteral("paused");
+            job.bytesDone = st.total_wanted_done;
+            job.bytesTotal = st.total_wanted;
+            emit jobUpdated(job);
+            return true;
+        }
+    } catch (const std::exception &ex) {
+        emit torrentFailed(QStringLiteral("session"), QString::fromUtf8(ex.what()));
+    }
+#else
+    Q_UNUSED(itemId);
+#endif
+    return false;
+}
+
+bool OfficialTorrentEngine::resumeItem(const QString &itemId)
+{
+#ifdef OCRCATALOG_HAS_TORRENT
+    if (!m_session || m_stopped)
+        return false;
+    try {
+        bool any = false;
+        for (const auto &handle : m_session->get_torrents()) {
+            if (!handle.is_valid())
+                continue;
+            const auto st = handle.status();
+            const QString name = QString::fromStdString(st.name);
+            if (!itemId.isEmpty() && jobIdForName(name) != itemId)
+                continue;
+            if (st.is_finished || st.errc)
+                continue;
+            handle.resume();
+            handle.unset_flags(lt::torrent_flags::paused);
+            DownloadJob job;
+            job.kind = kindForName(name);
+            job.itemId = jobIdForName(name);
+            job.displayName = name;
+            job.status = QStringLiteral("running");
+            job.bytesDone = st.total_wanted_done;
+            job.bytesTotal = st.total_wanted;
+            emit jobUpdated(job);
+            any = true;
+            if (!itemId.isEmpty())
+                return true;
+        }
+        return any;
+    } catch (const std::exception &ex) {
+        emit torrentFailed(QStringLiteral("session"), QString::fromUtf8(ex.what()));
+    }
+#else
+    Q_UNUSED(itemId);
+#endif
+    return false;
+}
+
 #ifdef OCRCATALOG_HAS_TORRENT
 QString OfficialTorrentEngine::jobIdForName(const QString &name) const
 {
     return m_jobIds.value(name, QStringLiteral("torrent:") + name);
+}
+
+DownloadJob::Kind OfficialTorrentEngine::kindForName(const QString &name) const
+{
+    const int stored = m_jobKinds.value(name, -1);
+    if (stored >= 0)
+        return static_cast<DownloadJob::Kind>(stored);
+    const QString id = jobIdForName(name);
+    if (id.startsWith(QLatin1String("album:")))
+        return DownloadJob::Torrent;
+    return DownloadJob::CollectionTorrent;
 }
 #endif
 
@@ -319,9 +457,12 @@ bool OfficialTorrentEngine::addOfficialTorrent(const QString &sourceUrl, const Q
 
     const QString jobId = itemId.isEmpty() ? QStringLiteral("torrent:") + name : itemId;
     m_jobIds.insert(name, jobId);
+    const DownloadJob::Kind kind = jobId.startsWith(QLatin1String("album:")) ? DownloadJob::Torrent
+                                                                            : DownloadJob::CollectionTorrent;
+    m_jobKinds.insert(name, static_cast<int>(kind));
 
     DownloadJob job;
-    job.kind = DownloadJob::CollectionTorrent;
+    job.kind = kind;
     job.itemId = jobId;
     job.displayName = name;
     job.status = QStringLiteral("running");
@@ -343,8 +484,8 @@ void OfficialTorrentEngine::poll()
             if (auto *update = lt::alert_cast<lt::state_update_alert>(alert)) {
                 for (const auto &st : update->status) {
                     DownloadJob job;
-                    job.kind = DownloadJob::CollectionTorrent;
                     const QString name = QString::fromStdString(st.name);
+                    job.kind = kindForName(name);
                     job.itemId = jobIdForName(name);
                     job.displayName = name;
                     job.bytesDone = st.total_wanted_done;
@@ -369,8 +510,8 @@ void OfficialTorrentEngine::poll()
                 } catch (const std::exception &) {
                 }
                 DownloadJob job;
-                job.kind = DownloadJob::CollectionTorrent;
                 const QString name = QString::fromStdString(st.name);
+                job.kind = kindForName(name);
                 job.itemId = jobIdForName(name);
                 job.displayName = name;
                 job.status = QStringLiteral("done");
