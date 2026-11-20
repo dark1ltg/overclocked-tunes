@@ -1,2 +1,2 @@
 v1.0.0
-# rebuild: bundle ICU in AppImage, AGL stub for DMG, NSIS full path
+# rebuild: AppImage sqlite-only SQL plugins (skip mimer/mysql/odbc)

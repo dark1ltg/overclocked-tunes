@@ -61,9 +61,17 @@ if [[ -z "${QMAKE}" ]]; then
   exit 1
 fi
 export LINUXDEPLOY_OUTPUT_VERSION="${LINUXDEPLOY_OUTPUT_VERSION:-1.0.0}"
-export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-sqldrivers;tls;iconengines;imageformats}"
+export EXTRA_QT_PLUGINS="${EXTRA_QT_PLUGINS:-tls;iconengines;imageformats}"
 export APPIMAGE_EXTRACT_AND_RUN=1
 export PATH="${BUILD}:${PATH}"
+
+# linuxdeploy-plugin-qt deploys every sqldrivers plugin. MySQL/ODBC/Mimer then
+# fail the build (missing libmimerapi.so) and would bloat the AppImage.
+SQL_PLUGINS="$("${QMAKE}" -query QT_INSTALL_PLUGINS)/sqldrivers"
+if [[ -d "${SQL_PLUGINS}" ]]; then
+  chmod -R u+w "${SQL_PLUGINS}" || true
+  find "${SQL_PLUGINS}" -type f ! -name '*sqlite*' -print -delete
+fi
 
 LD_ARGS=()
 if [[ -n "${QT_ROOT_DIR:-}" && -d "${QT_ROOT_DIR}/lib" ]]; then
